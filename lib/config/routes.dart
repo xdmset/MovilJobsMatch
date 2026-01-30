@@ -11,6 +11,10 @@ import '../presentation/screens/student/profile/student_profile_screen.dart';
 import '../presentation/screens/student/applications/applications_screen.dart';
 import '../presentation/screens/student/activity/activity_history_screen.dart';
 import '../presentation/screens/student/chat/chat_screen.dart';
+import '../presentation/screens/common/premium_screen.dart';
+
+import '../presentation/screens/common/settings_screen.dart';
+import '../presentation/screens/student/profile/edit_profile_screen.dart';
 
 class AppRouter {
   static final GoRouter router = GoRouter(
@@ -28,6 +32,19 @@ class AppRouter {
             return FadeTransition(opacity: animation, child: child);
           },
         ),
+      ),
+
+      GoRoute(
+        path: AppRoutes.settings,
+        name: 'settings',
+        builder: (context, state) => const SettingsScreen(),
+      ),
+
+      // Edit Profile
+      GoRoute(
+        path: '/edit-profile',
+        name: 'edit-profile',
+        builder: (context, state) => const EditProfileScreen(),
       ),
 
       // Auth Routes
@@ -58,6 +75,13 @@ class AppRouter {
             return SlideTransition(position: offsetAnimation, child: child);
           },
         ),
+      ),
+
+      // Common Routes
+      GoRoute(
+        path: AppRoutes.premium,
+        name: 'premium',
+        builder: (context, state) => const PremiumScreen(),
       ),
 
       GoRoute(

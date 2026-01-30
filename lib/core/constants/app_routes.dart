@@ -24,4 +24,6 @@ class AppRoutes {
   // Common Routes
   static const String settings = '/settings';
   static const String premium = '/premium';
+
+  
 }
