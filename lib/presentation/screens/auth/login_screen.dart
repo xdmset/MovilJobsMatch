@@ -28,24 +28,51 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  // Future<void> _handleLogin() async {
+  //   if (_formKey.currentState!.validate()) {
+  //     setState(() => _isLoading = true);
+
+  //     final authProvider = Provider.of<AuthProvider>(context, listen: false);
+  //     final success = await authProvider.login(
+  //       _emailController.text,
+  //       _passwordController.text,
+  //       _selectedUserType,
+  //     );
+
+  //     setState(() => _isLoading = false);
+
+  //     if (success && mounted) {
+  //       context.go(AppRoutes.studentHome);
+  //     }
+  //   }
+  // }
+
   Future<void> _handleLogin() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
+  if (_formKey.currentState!.validate()) {
+    setState(() => _isLoading = true);
 
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final success = await authProvider.login(
-        _emailController.text,
-        _passwordController.text,
-        _selectedUserType,
-      );
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final success = await authProvider.login(
+      _emailController.text,
+      _passwordController.text,
+      _selectedUserType,
+    );
 
-      setState(() => _isLoading = false);
+    setState(() => _isLoading = false);
 
-      if (success && mounted) {
+    if (success && mounted) {
+      // Redirigir según el tipo de usuario
+      if (_selectedUserType == UserType.student) {
+        context.go(AppRoutes.studentHome);
+      } else if (_selectedUserType == UserType.company) {
+        context.go(AppRoutes.companyHome);
+      } else {
+        // Admin u otro tipo
         context.go(AppRoutes.studentHome);
       }
     }
   }
+}
 
   @override
   Widget build(BuildContext context) {

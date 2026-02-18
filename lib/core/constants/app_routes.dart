@@ -11,7 +11,8 @@ class AppRoutes {
   static const String studentProfile = '/student/profile';
   static const String studentApplications = '/student/applications';
   static const String studentActivity = '/student/activity';
-  static const String studentChat = '/student/chat';
+  // static const String studentChat = '/student/chat';
+    static const String aiFeedback = '/student/ai-feedback'; 
 
   // Company Routes
   static const String companyHome = '/company/home';

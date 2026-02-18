@@ -104,8 +104,7 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
               IconButton(
                 icon: const Icon(Icons.edit, color: Colors.white),
                 onPressed: () {
-                  // TODO: Editar perfil
-                  _showEditProfileDialog();
+                  context.push('/edit-profile'); // Cambiado
                 },
               ),
               IconButton(
@@ -141,6 +140,8 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
                 onSelected: (value) {
                   if (value == 'logout') {
                     _handleLogout();
+                  } else if (value == 'settings') {
+                    context.push(AppRoutes.settings); // Cambiado
                   }
                 },
               ),

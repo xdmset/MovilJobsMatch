@@ -381,10 +381,17 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                             child: ElevatedButton.icon(
                               onPressed: () {
                                 Navigator.pop(context);
-                                context.push(AppRoutes.studentChat);
+                                context.push(
+                                  AppRoutes.aiFeedback, // Cambiado
+                                  extra: {
+                                    'applicationId': application['id'],
+                                    'companyName': application['company'],
+                                    'position': application['position'],
+                                  },
+                                );
                               },
-                              icon: const Icon(Icons.chat_outlined),
-                              label: const Text('Request Career Advice'),
+                              icon: const Icon(Icons.psychology_outlined),
+                              label: const Text('Get AI Career Analysis'),
                             ),
                           )
                         else if (application['status'] == 'in_process')

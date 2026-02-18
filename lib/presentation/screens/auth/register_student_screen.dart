@@ -143,30 +143,55 @@ class _RegisterStudentScreenState extends State<RegisterStudentScreen> {
     }
   }
 
+  // Future<void> _handleRegister() async {
+  //   if (!_formKey.currentState!.validate()) return;
+
+  //   setState(() => _isLoading = true);
+
+  //   final userData = {
+  //     'name': _fullNameController.text,
+  //     'email': _emailController.text,
+  //     'university': _universityController.text,
+  //     'major': _majorController.text,
+  //     'year': _selectedYear,
+  //     'skills': _selectedSkills,
+  //     'interests': _selectedInterests,
+  //   };
+
+  //   final authProvider = Provider.of<AuthProvider>(context, listen: false);
+  //   final success = await authProvider.register(userData, UserType.student);
+
+  //   setState(() => _isLoading = false);
+
+  //   if (success && mounted) {
+  //     context.go(AppRoutes.studentHome);
+  //   }
+  // }
+
   Future<void> _handleRegister() async {
-    if (!_formKey.currentState!.validate()) return;
+  if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
+  setState(() => _isLoading = true);
 
-    final userData = {
-      'name': _fullNameController.text,
-      'email': _emailController.text,
-      'university': _universityController.text,
-      'major': _majorController.text,
-      'year': _selectedYear,
-      'skills': _selectedSkills,
-      'interests': _selectedInterests,
-    };
+  final userData = {
+    'name': _fullNameController.text,
+    'email': _emailController.text,
+    'university': _universityController.text,
+    'major': _majorController.text,
+    'year': _selectedYear,
+    'skills': _selectedSkills,
+    'interests': _selectedInterests,
+  };
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final success = await authProvider.register(userData, UserType.student);
+  final authProvider = Provider.of<AuthProvider>(context, listen: false);
+  final success = await authProvider.register(userData, UserType.student);
 
-    setState(() => _isLoading = false);
+  setState(() => _isLoading = false);
 
-    if (success && mounted) {
-      context.go(AppRoutes.studentHome);
-    }
+  if (success && mounted) {
+    context.go(AppRoutes.studentHome);
   }
+}
 
   @override
   Widget build(BuildContext context) {

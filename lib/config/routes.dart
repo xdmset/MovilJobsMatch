@@ -16,6 +16,15 @@ import '../presentation/screens/common/premium_screen.dart';
 import '../presentation/screens/common/settings_screen.dart';
 import '../presentation/screens/student/profile/edit_profile_screen.dart';
 
+import '../presentation/screens/company/home/company_home_screen.dart';
+
+import '../presentation/screens/company/vacancies/vacancies_list_screen.dart';
+import '../presentation/screens/company/vacancies/create_vacancy_screen.dart';
+import '../presentation/screens/company/candidates/candidates_screen.dart';
+import '../presentation/screens/company/profile/company_profile_screen.dart';
+import '../presentation/screens/student/ai_feedback/ai_feedback_screen.dart';
+
+
 class AppRouter {
   static final GoRouter router = GoRouter(
     initialLocation: AppRoutes.splash,
@@ -32,6 +41,35 @@ class AppRouter {
             return FadeTransition(opacity: animation, child: child);
           },
         ),
+      ),
+
+            GoRoute(
+        path: AppRoutes.companyVacancies,
+        name: 'company-vacancies',
+        builder: (context, state) => const VacanciesListScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.companyCreateVacancy,
+        name: 'company-create-vacancy',
+        builder: (context, state) => const CreateVacancyScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.companyCandidates,
+        name: 'company-candidates',
+        builder: (context, state) => const CandidatesScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.companyProfile,
+        name: 'company-profile',
+        builder: (context, state) => const CompanyProfileScreen(),
+      ),
+
+
+      // Company Routes
+      GoRoute(
+        path: AppRoutes.companyHome,
+        name: 'company-home',
+        builder: (context, state) => const CompanyHomeScreen(),
       ),
 
       GoRoute(
@@ -143,12 +181,22 @@ class AppRouter {
         builder: (context, state) => const ActivityHistoryScreen(),
       ),
 
-      GoRoute(
-        path: AppRoutes.studentChat,
-        name: 'student-chat',
-        builder: (context, state) => const ChatScreen(),
-      ),
+      // GoRoute(
+      //   path: AppRoutes.studentChat,
+      //   name: 'student-chat',
+      //   builder: (context, state) => const ChatScreen(),
+      // ),
+
+      // AI Feedback
+        GoRoute(
+          path: AppRoutes.aiFeedback,
+          name: 'ai-feedback',
+          builder: (context, state) => const AIFeedbackScreen(),
+          ), 
+
     ],
+
+    
 
     // Error page
     errorBuilder: (context, state) => Scaffold(
