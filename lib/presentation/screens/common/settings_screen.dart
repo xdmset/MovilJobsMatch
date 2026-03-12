@@ -14,7 +14,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _notificationsEnabled = true;
   bool _emailNotifications = true;
   bool _pushNotifications = true;
   bool _matchNotifications = true;
