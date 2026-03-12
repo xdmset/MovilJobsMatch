@@ -29,23 +29,23 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   }
 
   void _onNavBarTap(int index) {
-    setState(() => _currentIndex = index);
-
-    switch (index) {
-      case 0:
+  setState(() => _currentIndex = index);
+  
+  switch (index) {
+    case 0:
       // Ya estamos en Home
-        break;
-      case 1:
-        context.push(AppRoutes.studentApplications);
-        break;
-      case 2:
-        context.push(AppRoutes.studentActivity);
-        break;
-      case 3:
-        context.push(AppRoutes.studentProfile);
-        break;
-    }
+      break;
+    case 1:
+      context.push(AppRoutes.studentApplications);
+      break;
+    case 2:
+      context.push(AppRoutes.studentActivity);
+      break;
+    case 3:
+      context.push(AppRoutes.studentProfile);
+      break;
   }
+}
 
   @override
   Widget build(BuildContext context) {

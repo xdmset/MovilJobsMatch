@@ -486,22 +486,6 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
     );
   }
 
-  void _showEditProfileDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Profile'),
-        content: const Text('Profile editing feature coming soon!'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _handleLogout() {
     showDialog(
       context: context,

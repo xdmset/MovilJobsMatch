@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_routes.dart';
+import '../../providers/auth_provider.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -10,7 +12,8 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
   late Animation<double> _fadeAnimation;
@@ -34,12 +37,24 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
     _controller.forward();
 
-    // Navegar a Welcome después de 2.5 segundos
-    Future.delayed(const Duration(milliseconds: 2500), () {
-      if (mounted) {
-        context.go(AppRoutes.welcome);
-      }
-    });
+    // Verificar sesión después de la animación
+    Future.delayed(const Duration(milliseconds: 2500), _verificarSesion);
+  }
+
+  Future<void> _verificarSesion() async {
+    if (!mounted) return;
+
+    final auth = context.read<AuthProvider>();
+    await auth.verificarSesion();
+
+    if (!mounted) return;
+
+    if (auth.autenticado) {
+      // Redirigir según el rol devuelto por el servidor
+      context.go(auth.esEmpresa ? AppRoutes.companyHome : AppRoutes.studentHome);
+    } else {
+      context.go(AppRoutes.welcome);
+    }
   }
 
   @override
@@ -67,7 +82,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Logo o icono
+                      // Logo
                       Container(
                         width: 120,
                         height: 120,
@@ -90,7 +105,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                       ),
                       const SizedBox(height: 24),
 
-                      // Nombre de la app
+                      // App name
                       const Text(
                         'JobMatch',
                         style: TextStyle(

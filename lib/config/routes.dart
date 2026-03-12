@@ -10,7 +10,6 @@ import '../presentation/screens/student/home/student_home_screen.dart';
 import '../presentation/screens/student/profile/student_profile_screen.dart';
 import '../presentation/screens/student/applications/applications_screen.dart';
 import '../presentation/screens/student/activity/activity_history_screen.dart';
-import '../presentation/screens/student/chat/chat_screen.dart';
 import '../presentation/screens/common/premium_screen.dart';
 
 import '../presentation/screens/common/settings_screen.dart';
@@ -191,8 +190,15 @@ class AppRouter {
         GoRoute(
           path: AppRoutes.aiFeedback,
           name: 'ai-feedback',
-          builder: (context, state) => const AIFeedbackScreen(),
-          ), 
+          builder: (context, state) {
+final extra = state.extra as Map<String, dynamic>?;
+return AIFeedbackScreen(
+applicationId: extra?['applicationId'],
+companyName: extra?['companyName'],
+position: extra?['position'],
+);
+},
+),
 
     ],
 
