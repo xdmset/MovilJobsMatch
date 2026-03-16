@@ -1,3 +1,5 @@
+// lib/presentation/screens/common/settings_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +7,8 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/constants/app_routes.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/settings_provider.dart';
+import '../../providers/theme_provider.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -14,21 +18,23 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _emailNotifications = true;
-  bool _pushNotifications = true;
-  bool _matchNotifications = true;
-  bool _messageNotifications = true;
-  bool _profileVisibility = true;
-  bool _showOnlineStatus = false;
-  String _language = 'English';
-  String _theme = 'System';
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) =>
+        context.read<SettingsProvider>().cargarPreferencias());
+  }
 
   @override
   Widget build(BuildContext context) {
+    final auth     = context.watch<AuthProvider>();
+    final settings = context.watch<SettingsProvider>();
+    final theme    = context.watch<ThemeProvider>();
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: const Text('Configuración'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
@@ -37,242 +43,116 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Account Section
-          _buildSectionHeader('Account'),
-          _buildSettingsCard([
-            _buildSettingsTile(
+
+          // ── Cuenta ────────────────────────────────────────────────────────
+          _sectionHeader('Cuenta'),
+          _card([
+            _tile(
               icon: Icons.person_outline,
-              title: 'Edit Profile',
-              subtitle: 'Update your personal information',
-              onTap: () {
-                context.push('/edit-profile');
-              },
+              title: 'Editar perfil',
+              subtitle: 'Actualiza tu información personal',
+              onTap: () => context.push(AppRoutes.editProfile),
             ),
             const Divider(height: 1),
-            _buildSettingsTile(
+            _tile(
               icon: Icons.email_outlined,
               title: 'Email',
-              subtitle: 'alex.johnson@stanford.edu',
-              onTap: () {
-                _showChangeEmailDialog();
-              },
+              subtitle: auth.usuario?.email ?? '—',
+              trailing: const SizedBox.shrink(),
+              onTap: () {},
             ),
             const Divider(height: 1),
-            _buildSettingsTile(
-              icon: Icons.lock_outline,
-              title: 'Change Password',
-              subtitle: 'Update your password',
-              onTap: () {
-                _showChangePasswordDialog();
-              },
-            ),
-            const Divider(height: 1),
-            _buildSettingsTile(
+            _tile(
               icon: Icons.workspace_premium,
-              title: 'Premium Subscription',
-              subtitle: 'Free Plan',
-              trailing: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  gradient: AppColors.purpleGradient,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  'Upgrade',
-                  style: AppTextStyles.bodySmall.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              onTap: () {
-                context.push(AppRoutes.premium);
-              },
+              title: 'Suscripción',
+              subtitle: auth.esPremium ? 'Plan Premium ✨' : 'Plan Gratis',
+              trailing: auth.esPremium
+                  ? null
+                  : Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        gradient: AppColors.purpleGradient,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text('Mejorar',
+                          style: AppTextStyles.bodySmall.copyWith(
+                              color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+              onTap: () => context.push(AppRoutes.premium),
             ),
           ]),
 
           const SizedBox(height: 24),
 
-          // Notifications Section
-          _buildSectionHeader('Notifications'),
-          _buildSettingsCard([
-            _buildSwitchTile(
+          // ── Notificaciones ────────────────────────────────────────────────
+          // Se guardan localmente — cuando integres FCM/OneSignal
+          // ya tienes los flags listos para leer desde SettingsProvider
+          _sectionHeader('Notificaciones'),
+          _card([
+            _switchTile(
               icon: Icons.notifications_outlined,
-              title: 'Push Notifications',
-              subtitle: 'Receive push notifications',
-              value: _pushNotifications,
-              onChanged: (value) {
-                setState(() => _pushNotifications = value);
-              },
+              title: 'Notificaciones push',
+              subtitle: 'Recibir alertas en el dispositivo',
+              value: settings.pushNotifications,
+              onChanged: settings.setPushNotifications,
             ),
             const Divider(height: 1),
-            _buildSwitchTile(
-              icon: Icons.email_outlined,
-              title: 'Email Notifications',
-              subtitle: 'Receive email updates',
-              value: _emailNotifications,
-              onChanged: (value) {
-                setState(() => _emailNotifications = value);
-              },
-            ),
-            const Divider(height: 1),
-            _buildSwitchTile(
+            _switchTile(
               icon: Icons.favorite_outline,
-              title: 'Match Notifications',
-              subtitle: 'Get notified when you match',
-              value: _matchNotifications,
-              onChanged: (value) {
-                setState(() => _matchNotifications = value);
-              },
+              title: 'Notificaciones de match',
+              subtitle: 'Avisarme cuando haya un nuevo match',
+              value: settings.matchNotifications,
+              onChanged: settings.setMatchNotifications,
             ),
             const Divider(height: 1),
-            _buildSwitchTile(
-              icon: Icons.chat_bubble_outline,
-              title: 'Message Notifications',
-              subtitle: 'Get notified of new messages',
-              value: _messageNotifications,
-              onChanged: (value) {
-                setState(() => _messageNotifications = value);
-              },
+            _switchTile(
+              icon: Icons.email_outlined,
+              title: 'Notificaciones por email',
+              subtitle: 'Recibir actualizaciones por correo',
+              value: settings.emailNotifications,
+              onChanged: settings.setEmailNotifications,
             ),
           ]),
 
           const SizedBox(height: 24),
 
-          // Privacy Section
-          _buildSectionHeader('Privacy'),
-          _buildSettingsCard([
-            _buildSwitchTile(
-              icon: Icons.visibility_outlined,
-              title: 'Profile Visibility',
-              subtitle: 'Show your profile to companies',
-              value: _profileVisibility,
-              onChanged: (value) {
-                setState(() => _profileVisibility = value);
-              },
-            ),
-            const Divider(height: 1),
-            _buildSwitchTile(
-              icon: Icons.circle,
-              title: 'Show Online Status',
-              subtitle: 'Let others see when you\'re active',
-              value: _showOnlineStatus,
-              onChanged: (value) {
-                setState(() => _showOnlineStatus = value);
-              },
-            ),
-            const Divider(height: 1),
-            _buildSettingsTile(
-              icon: Icons.block,
-              title: 'Blocked Companies',
-              subtitle: 'Manage blocked accounts',
-              onTap: () {
-                _showBlockedCompanies();
-              },
-            ),
-          ]),
-
-          const SizedBox(height: 24),
-
-          // Preferences Section
-          _buildSectionHeader('Preferences'),
-          _buildSettingsCard([
-            _buildSettingsTile(
+          // ── Preferencias ──────────────────────────────────────────────────
+          _sectionHeader('Preferencias'),
+          _card([
+            _tile(
               icon: Icons.language,
-              title: 'Language',
-              subtitle: _language,
-              onTap: () {
-                _showLanguageDialog();
-              },
+              title: 'Idioma',
+              subtitle: theme.locale.languageCode == 'en' ? 'English' : 'Español',
+              onTap: () => _showLanguageDialog(settings, theme),
             ),
             const Divider(height: 1),
-            _buildSettingsTile(
-              icon: Icons.dark_mode_outlined,
-              title: 'Theme',
-              subtitle: _theme,
-              onTap: () {
-                _showThemeDialog();
-              },
-            ),
-            const Divider(height: 1),
-            _buildSettingsTile(
-              icon: Icons.location_on_outlined,
-              title: 'Location Preferences',
-              subtitle: 'Set your preferred work locations',
-              onTap: () {
-                _showLocationPreferences();
-              },
+            _tile(
+              icon: _themeIcon(theme.themeMode),
+              title: 'Tema',
+              subtitle: _labelTema(theme.themeMode),
+              onTap: () => _showThemeDialog(settings, theme),
             ),
           ]),
 
           const SizedBox(height: 24),
 
-          // Support Section
-          _buildSectionHeader('Support & About'),
-          _buildSettingsCard([
-            _buildSettingsTile(
-              icon: Icons.help_outline,
-              title: 'Help Center',
-              subtitle: 'Get help and support',
-              onTap: () {
-                // TODO: Open help center
-              },
-            ),
-            const Divider(height: 1),
-            _buildSettingsTile(
-              icon: Icons.description_outlined,
-              title: 'Terms of Service',
-              subtitle: 'Read our terms and conditions',
-              onTap: () {
-                // TODO: Open terms
-              },
-            ),
-            const Divider(height: 1),
-            _buildSettingsTile(
-              icon: Icons.privacy_tip_outlined,
-              title: 'Privacy Policy',
-              subtitle: 'Learn how we protect your data',
-              onTap: () {
-                // TODO: Open privacy policy
-              },
-            ),
-            const Divider(height: 1),
-            _buildSettingsTile(
-              icon: Icons.info_outline,
-              title: 'About',
-              subtitle: 'Version 1.0.0',
-              onTap: () {
-                _showAboutDialog();
-              },
-            ),
-          ]),
-
-          const SizedBox(height: 24),
-
-          // Danger Zone
-          _buildSectionHeader('Danger Zone'),
-          _buildSettingsCard([
-            _buildSettingsTile(
+          // ── Zona de peligro ───────────────────────────────────────────────
+          _sectionHeader('Zona de peligro'),
+          _card([
+            _tile(
               icon: Icons.logout,
-              title: 'Logout',
-              subtitle: 'Sign out of your account',
+              title: 'Cerrar sesión',
+              subtitle: 'Salir de tu cuenta',
               titleColor: AppColors.error,
-              onTap: () {
-                _handleLogout();
-              },
+              onTap: _handleLogout,
             ),
             const Divider(height: 1),
-            _buildSettingsTile(
+            _tile(
               icon: Icons.delete_forever,
-              title: 'Delete Account',
-              subtitle: 'Permanently delete your account',
+              title: 'Eliminar cuenta',
+              subtitle: 'Borrar permanentemente tu cuenta y datos',
               titleColor: AppColors.error,
-              onTap: () {
-                _handleDeleteAccount();
-              },
+              onTap: _handleDeleteAccount,
             ),
           ]),
 
@@ -282,445 +162,246 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildSectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 16, bottom: 12),
-      child: Text(
-        title,
-        style: AppTextStyles.subtitle1.copyWith(
-          fontWeight: FontWeight.bold,
-          color: AppColors.textSecondary,
+  // ── Idioma ────────────────────────────────────────────────────────────────
+  void _showLanguageDialog(SettingsProvider s, ThemeProvider theme) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Idioma'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _langOption('Español', 'es', s, theme),
+            _langOption('English', 'en', s, theme),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildSettingsCard(List<Widget> children) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.cardBackground,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.textPrimary.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(children: children),
+  Widget _langOption(String label, String code, SettingsProvider s, ThemeProvider theme) {
+    final selected = theme.locale.languageCode == code;
+    return ListTile(
+      title: Text(label),
+      trailing: selected ? const Icon(Icons.check, color: AppColors.primaryPurple) : null,
+      onTap: () {
+        theme.setLocale(label);   // aplica inmediatamente
+        s.setLanguage(label);     // sincroniza SettingsProvider
+        Navigator.pop(context);
+      },
     );
   }
 
-  Widget _buildSettingsTile({
+  // ── Tema ──────────────────────────────────────────────────────────────────
+  void _showThemeDialog(SettingsProvider s, ThemeProvider theme) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Tema'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _themeOptionTile('Sistema', ThemeMode.system, Icons.brightness_auto_outlined, s, theme),
+            _themeOptionTile('Claro',   ThemeMode.light,  Icons.light_mode_outlined,      s, theme),
+            _themeOptionTile('Oscuro',  ThemeMode.dark,   Icons.dark_mode_outlined,       s, theme),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _themeOptionTile(String label, ThemeMode mode, IconData icon,
+      SettingsProvider s, ThemeProvider theme) {
+    final selected = theme.themeMode == mode;
+    return ListTile(
+      leading: Icon(icon, color: selected ? AppColors.primaryPurple : AppColors.textSecondary),
+      title: Text(label),
+      trailing: selected ? const Icon(Icons.check, color: AppColors.primaryPurple) : null,
+      onTap: () {
+        theme.setTheme(label);  // aplica inmediatamente — no necesita reiniciar
+        s.setTheme(label);      // sincroniza SettingsProvider
+        Navigator.pop(context);
+      },
+    );
+  }
+
+  IconData _themeIcon(ThemeMode m) {
+    switch (m) {
+      case ThemeMode.light:  return Icons.light_mode_outlined;
+      case ThemeMode.dark:   return Icons.dark_mode_outlined;
+      default:               return Icons.brightness_auto_outlined;
+    }
+  }
+
+  String _labelTema(ThemeMode m) {
+    switch (m) {
+      case ThemeMode.light:  return 'Claro';
+      case ThemeMode.dark:   return 'Oscuro';
+      default:               return 'Sistema';
+    }
+  }
+
+  // ── Logout ────────────────────────────────────────────────────────────────
+  void _handleLogout() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Cerrar sesión'),
+        content: const Text('¿Seguro que quieres salir?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () {
+              context.read<AuthProvider>().logout();
+              Navigator.pop(context);
+              context.go(AppRoutes.welcome);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Salir'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Eliminar cuenta ───────────────────────────────────────────────────────
+  void _handleDeleteAccount() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Eliminar cuenta'),
+        content: const Text(
+          'Esta acción no se puede deshacer. Todos tus datos serán eliminados permanentemente.\n\n¿Deseas continuar?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () { Navigator.pop(context); _confirmarEliminacion(); },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmarEliminacion() {
+    final passCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Confirmar eliminación'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Ingresa tu contraseña para confirmar:'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: passCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Contraseña',
+                prefixIcon: Icon(Icons.lock_outline),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancelar')),
+          Consumer<SettingsProvider>(
+            builder: (_, settings, __) => ElevatedButton(
+              onPressed: settings.deletingAccount ? null : () async {
+                if (passCtrl.text.trim().isEmpty) return;
+                final userId = context.read<AuthProvider>().usuario?.id;
+                if (userId == null) return;
+                final ok = await context.read<SettingsProvider>().eliminarCuenta(userId);
+                if (!mounted) return;
+                Navigator.pop(dialogCtx);
+                if (ok) {
+                  context.read<AuthProvider>().logout();
+                  context.go(AppRoutes.welcome);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(settings.error ?? 'Error al eliminar la cuenta'),
+                    backgroundColor: AppColors.error,
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+              child: settings.deletingAccount
+                  ? const SizedBox(width: 20, height: 20,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Text('Confirmar'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── UI helpers ─────────────────────────────────────────────────────────────
+  Widget _sectionHeader(String t) => Padding(
+    padding: const EdgeInsets.only(left: 4, bottom: 12),
+    child: Text(t, style: AppTextStyles.subtitle1.copyWith(
+        fontWeight: FontWeight.bold, color: AppColors.textSecondary)),
+  );
+
+  Widget _card(List<Widget> children) => Container(
+    decoration: BoxDecoration(
+      color: AppColors.cardBackground,
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: [BoxShadow(
+          color: AppColors.textPrimary.withOpacity(0.05),
+          blurRadius: 10, offset: const Offset(0, 2))],
+    ),
+    child: Column(children: children),
+  );
+
+  Widget _tile({
     required IconData icon,
     required String title,
     required String subtitle,
     Widget? trailing,
     Color? titleColor,
     required VoidCallback onTap,
-  }) {
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: (titleColor ?? AppColors.primaryPurple).withOpacity(0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(
-          icon,
-          color: titleColor ?? AppColors.primaryPurple,
-          size: 24,
-        ),
+  }) => ListTile(
+    leading: Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: (titleColor ?? AppColors.primaryPurple).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(10),
       ),
-      title: Text(
-        title,
-        style: AppTextStyles.subtitle1.copyWith(
-          fontWeight: FontWeight.w600,
-          color: titleColor,
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: AppTextStyles.bodySmall.copyWith(
-          color: AppColors.textSecondary,
-        ),
-      ),
-      trailing: trailing ??
-          const Icon(
-            Icons.chevron_right,
-            color: AppColors.textTertiary,
-          ),
-      onTap: onTap,
-    );
-  }
+      child: Icon(icon, color: titleColor ?? AppColors.primaryPurple, size: 24),
+    ),
+    title: Text(title, style: AppTextStyles.subtitle1.copyWith(
+        fontWeight: FontWeight.w600, color: titleColor)),
+    subtitle: Text(subtitle, style: AppTextStyles.bodySmall.copyWith(
+        color: AppColors.textSecondary)),
+    trailing: trailing ?? const Icon(Icons.chevron_right, color: AppColors.textTertiary),
+    onTap: onTap,
+  );
 
-  Widget _buildSwitchTile({
+  Widget _switchTile({
     required IconData icon,
     required String title,
     required String subtitle,
     required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return ListTile(
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: AppColors.primaryPurple.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(
-          icon,
-          color: AppColors.primaryPurple,
-          size: 24,
-        ),
+    required Future<void> Function(bool) onChanged,
+  }) => ListTile(
+    leading: Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: AppColors.primaryPurple.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(10),
       ),
-      title: Text(
-        title,
-        style: AppTextStyles.subtitle1.copyWith(
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: AppTextStyles.bodySmall.copyWith(
-          color: AppColors.textSecondary,
-        ),
-      ),
-      trailing: Switch(
-        value: value,
-        onChanged: onChanged,
-        activeColor: AppColors.primaryPurple,
-      ),
-    );
-  }
-
-  void _showChangeEmailDialog() {
-    final emailController = TextEditingController();
-    final passwordController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Change Email'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: emailController,
-              decoration: const InputDecoration(
-                labelText: 'New Email',
-                prefixIcon: Icon(Icons.email_outlined),
-              ),
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: passwordController,
-              decoration: const InputDecoration(
-                labelText: 'Current Password',
-                prefixIcon: Icon(Icons.lock_outline),
-              ),
-              obscureText: true,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Email updated successfully')),
-              );
-            },
-            child: const Text('Update'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showChangePasswordDialog() {
-    final currentPasswordController = TextEditingController();
-    final newPasswordController = TextEditingController();
-    final confirmPasswordController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Change Password'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: currentPasswordController,
-              decoration: const InputDecoration(
-                labelText: 'Current Password',
-                prefixIcon: Icon(Icons.lock_outline),
-              ),
-              obscureText: true,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: newPasswordController,
-              decoration: const InputDecoration(
-                labelText: 'New Password',
-                prefixIcon: Icon(Icons.lock_outline),
-              ),
-              obscureText: true,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: confirmPasswordController,
-              decoration: const InputDecoration(
-                labelText: 'Confirm New Password',
-                prefixIcon: Icon(Icons.lock_outline),
-              ),
-              obscureText: true,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Password updated successfully')),
-              );
-            },
-            child: const Text('Update'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showLanguageDialog() {
-    final languages = ['English', 'Español', 'Français', 'Deutsch', '中文'];
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Language'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: languages.map((lang) {
-            return RadioListTile<String>(
-              title: Text(lang),
-              value: lang,
-              groupValue: _language,
-              onChanged: (value) {
-                setState(() => _language = value!);
-                Navigator.pop(context);
-              },
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-
-  void _showThemeDialog() {
-    final themes = ['Light', 'Dark', 'System'];
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Theme'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: themes.map((theme) {
-            return RadioListTile<String>(
-              title: Text(theme),
-              value: theme,
-              groupValue: _theme,
-              onChanged: (value) {
-                setState(() => _theme = value!);
-                Navigator.pop(context);
-              },
-            );
-          }).toList(),
-        ),
-      ),
-    );
-  }
-
-  void _showLocationPreferences() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Location Preferences'),
-        content: const Text(
-          'Set your preferred work locations to get better job matches.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showBlockedCompanies() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Blocked Companies'),
-        content: const Text('You haven\'t blocked any companies yet.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showAboutDialog() {
-    showAboutDialog(
-      context: context,
-      applicationName: 'JobMatch',
-      applicationVersion: '1.0.0',
-      applicationIcon: Container(
-        width: 60,
-        height: 60,
-        decoration: BoxDecoration(
-          gradient: AppColors.purpleGradient,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Icon(
-          Icons.work_outline,
-          color: Colors.white,
-          size: 30,
-        ),
-      ),
-      children: [
-        const SizedBox(height: 16),
-        Text(
-          'JobMatch helps students and recent graduates connect with their dream opportunities through an intuitive swipe-based interface.',
-          style: AppTextStyles.bodyMedium,
-        ),
-        const SizedBox(height: 16),
-        Text(
-          '© 2024 JobMatch. All rights reserved.',
-          style: AppTextStyles.bodySmall.copyWith(
-            color: AppColors.textTertiary,
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _handleLogout() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final authProvider =
-                  Provider.of<AuthProvider>(context, listen: false);
-              authProvider.logout();
-              Navigator.pop(context);
-              context.go(AppRoutes.welcome);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-            ),
-            child: const Text('Logout'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _handleDeleteAccount() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Account'),
-        content: const Text(
-          'This action cannot be undone. All your data will be permanently deleted.\n\nAre you sure you want to continue?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _confirmDeleteAccount();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _confirmDeleteAccount() {
-    final passwordController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirm Deletion'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Enter your password to confirm account deletion:',
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: passwordController,
-              decoration: const InputDecoration(
-                labelText: 'Password',
-                prefixIcon: Icon(Icons.lock_outline),
-              ),
-              obscureText: true,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              context.go(AppRoutes.welcome);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-            ),
-            child: const Text('Confirm Delete'),
-          ),
-        ],
-      ),
-    );
-  }
+      child: Icon(icon, color: AppColors.primaryPurple, size: 24),
+    ),
+    title: Text(title, style: AppTextStyles.subtitle1.copyWith(fontWeight: FontWeight.w600)),
+    subtitle: Text(subtitle, style: AppTextStyles.bodySmall.copyWith(
+        color: AppColors.textSecondary)),
+    trailing: Switch(value: value, onChanged: onChanged, activeColor: AppColors.primaryPurple),
+  );
 }

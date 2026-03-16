@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../constants/api_constants.dart';
 import '../errors/api_exceptions.dart';
 import 'token_storage.dart';
@@ -146,21 +147,48 @@ class ApiService {
     required File file,
     required String fieldName,
   }) async {
-    final uri = Uri.parse('${ApiConstants.apiBaseUrl}$path');
+    final uri        = Uri.parse('${ApiConstants.apiBaseUrl}$path');
     final authHeader = await TokenStorage.instance.getAuthHeader();
+    final ext        = file.path.split('.').last.toLowerCase();
+    final mime       = _mimeType(ext);
+
+    // ignore: avoid_print
+    print('▶ UPLOAD $uri  ext=$ext  mime=$mime');
+
+    final multipart = await http.MultipartFile.fromPath(
+      fieldName,
+      file.path,
+      contentType: MediaType.parse(mime),
+    );
 
     final request = http.MultipartRequest('POST', uri)
       ..headers['Authorization'] = authHeader
-      ..files.add(await http.MultipartFile.fromPath(fieldName, file.path));
+      ..files.add(multipart);
 
     try {
-      final streamed = await request.send().timeout(ApiConstants.timeout);
-      final response = await http.Response.fromStream(streamed);
+      final streamed  = await request.send().timeout(ApiConstants.timeout);
+      final response  = await http.Response.fromStream(streamed);
+      // ignore: avoid_print
+      print('◀ ${response.statusCode} ${response.body}');
       return _handle(response);
     } on SocketException {
       throw ApiException.network();
     } on TimeoutException {
       throw ApiException.timeout();
+    }
+  }
+
+  String _mimeType(String ext) {
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg': return 'image/jpeg';
+      case 'png':  return 'image/png';
+      case 'gif':  return 'image/gif';
+      case 'webp': return 'image/webp';
+      case 'pdf':  return 'application/pdf';
+      case 'doc':  return 'application/msword';
+      case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      default:     return 'application/octet-stream';
     }
   }
 
