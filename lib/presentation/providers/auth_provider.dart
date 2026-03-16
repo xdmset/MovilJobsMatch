@@ -117,6 +117,8 @@ class AuthProvider extends ChangeNotifier {
     required String nombreComercial,
     String? sector,
     String? descripcion,
+    String? sitioWeb,
+    String? ubicacionSede,
   }) async {
     _iniciarCarga();
 
@@ -127,6 +129,8 @@ class AuthProvider extends ChangeNotifier {
         nombreComercial: nombreComercial,
         sector: sector,
         descripcion: descripcion,
+        sitioWeb: sitioWeb,
+        ubicacionSede: ubicacionSede,
       );
       _status = AuthStatus.autenticado;
       _error = null;
