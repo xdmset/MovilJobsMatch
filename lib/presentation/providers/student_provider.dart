@@ -1,113 +1,123 @@
+// lib/presentation/providers/student_provider.dart
+
 import 'package:flutter/material.dart';
-import '../../data/models/vacancy_model.dart';
+import '../../data/repositories/student_repository.dart';
 
 class StudentProvider extends ChangeNotifier {
-  List<VacancyModel> _vacancies = [];
-  List<VacancyModel> _likedVacancies = [];
-  int _currentIndex = 0;
-  int _dailySwipes = 0;
-  final int _maxDailySwipes = 10; // Límite para usuarios gratuitos
+  final _repo = StudentRepository.instance;
 
-  List<VacancyModel> get vacancies => _vacancies;
-  List<VacancyModel> get likedVacancies => _likedVacancies;
-  int get currentIndex => _currentIndex;
-  int get dailySwipes => _dailySwipes;
-  int get maxDailySwipes => _maxDailySwipes;
-  bool get hasReachedLimit => _dailySwipes >= _maxDailySwipes;
-  int get remainingSwipes => _maxDailySwipes - _dailySwipes;
+  // ── Vacantes ──────────────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _vacantes    = [];
+  int  _currentIndex  = 0;
+  int  _dailySwipes   = 0;
+  final int _maxSwipes = 10;
+  bool _cargandoVacantes = false;
 
-  VacancyModel? get currentVacancy {
-    if (_currentIndex < _vacancies.length) {
-      return _vacancies[_currentIndex];
+  String? _filtroModalidad;
+  String? _filtroUbicacion;
+  double? _filtroSueldoMin;
+
+  List<Map<String, dynamic>> get vacantes      => _vacantes;
+  int  get currentIndex                         => _currentIndex;
+  bool get hasReachedLimit                      => _dailySwipes >= _maxSwipes;
+  int  get remainingSwipes                      => _maxSwipes - _dailySwipes;
+  bool get cargandoVacantes                     => _cargandoVacantes;
+
+  Map<String, dynamic>? get currentVacancy =>
+      _currentIndex < _vacantes.length ? _vacantes[_currentIndex] : null;
+
+  // ── Matches (cuando un swipe genera match) ────────────────────────────────
+  // { id, estudiante_id, vacante_id, fecha_match, vacante: {...} }
+  final List<Map<String, dynamic>> _matches = [];
+  List<Map<String, dynamic>> get matches => _matches;
+
+  // ── Historial de swipes (para pantalla actividad) ─────────────────────────
+  // { titulo, modalidad, ..., tipo: 'like'|'dislike', timestamp, match: bool }
+  final List<Map<String, dynamic>> _historial = [];
+  List<Map<String, dynamic>> get historial => _historial;
+
+  // ── Cargar vacantes ───────────────────────────────────────────────────────
+  Future<void> cargarVacantes({
+    String? modalidad, String? ubicacion, double? sueldoMin,
+  }) async {
+    _cargandoVacantes = true;
+    notifyListeners();
+    try {
+      _vacantes = await _repo.getVacantes(
+        modalidad: modalidad ?? _filtroModalidad,
+        ubicacion: ubicacion ?? _filtroUbicacion,
+        sueldoMin: sueldoMin ?? _filtroSueldoMin,
+      );
+      _currentIndex = 0;
+    } catch (_) { _vacantes = []; }
+    _cargandoVacantes = false;
+    notifyListeners();
+  }
+
+  Future<void> aplicarFiltros({
+    String? modalidad, String? ubicacion, double? sueldoMin,
+  }) async {
+    _filtroModalidad = modalidad;
+    _filtroUbicacion = ubicacion;
+    _filtroSueldoMin = sueldoMin;
+    await cargarVacantes(modalidad: modalidad, ubicacion: ubicacion, sueldoMin: sueldoMin);
+  }
+
+  void limpiarFiltros() {
+    _filtroModalidad = null; _filtroUbicacion = null; _filtroSueldoMin = null;
+    cargarVacantes();
+  }
+
+  // ── Like — interes_estudiante: true ───────────────────────────────────────
+  Future<bool> likeVacancy(int estudianteId) async {
+    if (hasReachedLimit || currentVacancy == null) return false;
+    final v = currentVacancy!;
+    final vacanteId = v['id'] as int?;
+
+    _dailySwipes++;
+    _currentIndex++;
+    notifyListeners();
+
+    bool esMatch = false;
+    if (vacanteId != null) {
+      final matchRes = await _repo.registrarSwipe(estudianteId, vacanteId, true);
+      if (matchRes != null) {
+        esMatch = true;
+        _matches.insert(0, {...matchRes, 'vacante': v});
+      }
     }
-    return null;
-  }
 
-  void loadVacancies() {
-    // Mock data
-    _vacancies = _getMockVacancies();
+    _historial.insert(0, {
+      ...v,
+      'tipo':      'like',
+      'timestamp': DateTime.now().toIso8601String(),
+      'match':     esMatch,
+    });
     notifyListeners();
+    return esMatch; // true = hay match
   }
 
-  void likeVacancy(VacancyModel vacancy) {
-    if (hasReachedLimit) return;
+  // ── Dislike — interes_estudiante: false ───────────────────────────────────
+  Future<void> dislikeVacancy(int estudianteId) async {
+    if (hasReachedLimit || currentVacancy == null) return;
+    final v = currentVacancy!;
+    final vacanteId = v['id'] as int?;
 
-    _likedVacancies.add(vacancy);
+    _historial.insert(0, {
+      ...v,
+      'tipo':      'dislike',
+      'timestamp': DateTime.now().toIso8601String(),
+      'match':     false,
+    });
+
     _dailySwipes++;
     _currentIndex++;
     notifyListeners();
+
+    if (vacanteId != null) {
+      await _repo.registrarSwipe(estudianteId, vacanteId, false);
+    }
   }
 
-  void dislikeVacancy() {
-    if (hasReachedLimit) return;
-
-    _dailySwipes++;
-    _currentIndex++;
-    notifyListeners();
-  }
-
-  void resetDailySwipes() {
-    _dailySwipes = 0;
-    notifyListeners();
-  }
-
-  List<VacancyModel> _getMockVacancies() {
-    return [
-      VacancyModel(
-        id: '1',
-        companyName: 'Spotify Inc.',
-        position: 'UX Design Intern',
-        location: 'New York, NY (Hybrid)',
-        salary: '\$30 - \$40 /hr',
-        type: 'Summer 2024 • Remote • Entry Level',
-        description: 'Join our Design Systems team to help build beautiful user experiences...',
-        requirements: ['Figma', 'Adobe XD', 'User Research'],
-        companyLogo: '🎵',
-      ),
-      VacancyModel(
-        id: '2',
-        companyName: 'Google',
-        position: 'Software Engineer Intern',
-        location: 'Mountain View, CA',
-        salary: '\$50 - \$60 /hr',
-        type: 'Summer 2024 • On-site • Entry Level',
-        description: 'Work on cutting-edge technologies with world-class engineers...',
-        requirements: ['Python', 'Java', 'Algorithms'],
-        companyLogo: '🔍',
-      ),
-      VacancyModel(
-        id: '3',
-        companyName: 'Tesla',
-        position: 'Mechanical Engineering Intern',
-        location: 'Fremont, CA',
-        salary: '\$35 - \$45 /hr',
-        type: 'Fall 2024 • On-site • Entry Level',
-        description: 'Help design and test next-generation electric vehicles...',
-        requirements: ['CAD', 'SolidWorks', 'Manufacturing'],
-        companyLogo: '⚡',
-      ),
-      VacancyModel(
-        id: '4',
-        companyName: 'Microsoft',
-        position: 'Data Science Intern',
-        location: 'Redmond, WA (Hybrid)',
-        salary: '\$45 - \$55 /hr',
-        type: 'Summer 2024 • Hybrid • Entry Level',
-        description: 'Apply machine learning to solve real-world problems...',
-        requirements: ['Python', 'SQL', 'Machine Learning'],
-        companyLogo: '💻',
-      ),
-      VacancyModel(
-        id: '5',
-        companyName: 'Amazon',
-        position: 'Marketing Intern',
-        location: 'Seattle, WA',
-        salary: '\$28 - \$38 /hr',
-        type: 'Summer 2024 • On-site • Entry Level',
-        description: 'Create and execute marketing campaigns for Amazon Prime...',
-        requirements: ['Marketing', 'Analytics', 'Communication'],
-        companyLogo: '📦',
-      ),
-    ];
-  }
+  void resetDailySwipes() { _dailySwipes = 0; notifyListeners(); }
 }
