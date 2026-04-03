@@ -29,15 +29,30 @@ class StudentHomeScreen extends StatelessWidget {
                     ? 'Límite diario alcanzado'
                     : '${p.remainingSwipes} swipes disponibles',
                 style: AppTextStyles.bodySmall.copyWith(
-                  color: p.hasReachedLimit ? AppColors.error : AppColors.textTertiary,
-                ),
+                  color: p.hasReachedLimit
+                      ? AppColors.error : AppColors.textTertiary),
               ),
             ],
           ),
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.tune),
-              onPressed: () => _showFilters(context)),
+          // Botón de filtros con badge si hay filtros activos
+          Consumer<StudentProvider>(builder: (_, p, __) {
+            final hayFiltros = p.filtroModalidad != null ||
+                p.filtroUbicacion != null || p.filtroSueldoMin != null;
+            return Stack(children: [
+              IconButton(
+                icon: const Icon(Icons.tune),
+                onPressed: () => _showFilters(context),
+              ),
+              if (hayFiltros)
+                Positioned(right: 8, top: 8, child: Container(
+                  width: 8, height: 8,
+                  decoration: const BoxDecoration(
+                      color: AppColors.primaryPurple, shape: BoxShape.circle),
+                )),
+            ]);
+          }),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             onSelected: (v) => _handleMenu(context, v),
@@ -49,9 +64,11 @@ class StudentHomeScreen extends StatelessWidget {
                   child: Row(children: [Icon(Icons.dark_mode_outlined),
                     SizedBox(width: 12), Text('Tema')])),
               PopupMenuItem(value: 'logout',
-                  child: Row(children: [Icon(Icons.logout, color: AppColors.error),
+                  child: Row(children: [
+                    Icon(Icons.logout, color: AppColors.error),
                     SizedBox(width: 12),
-                    Text('Cerrar sesión', style: TextStyle(color: AppColors.error))])),
+                    Text('Cerrar sesión',
+                        style: TextStyle(color: AppColors.error))])),
             ],
           ),
         ],
@@ -69,8 +86,9 @@ class StudentHomeScreen extends StatelessWidget {
     );
   }
 
-  void _handleMenu(BuildContext context, String value) {
-    switch (value) {
+  // ── Menú ──────────────────────────────────────────────────────────────────
+  void _handleMenu(BuildContext context, String v) {
+    switch (v) {
       case 'settings': context.push(AppRoutes.settings); break;
       case 'theme':    _showThemeDialog(context); break;
       case 'logout':   _handleLogout(context); break;
@@ -83,9 +101,12 @@ class StudentHomeScreen extends StatelessWidget {
     showDialog(context: context, builder: (_) => AlertDialog(
       title: const Text('Tema'),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
-        _tOpt(context, 'Sistema', ThemeMode.system, Icons.brightness_auto_outlined, tp, sp),
-        _tOpt(context, 'Claro',   ThemeMode.light,  Icons.light_mode_outlined,      tp, sp),
-        _tOpt(context, 'Oscuro',  ThemeMode.dark,   Icons.dark_mode_outlined,       tp, sp),
+        _tOpt(context, 'Sistema', ThemeMode.system,
+            Icons.brightness_auto_outlined, tp, sp),
+        _tOpt(context, 'Claro',   ThemeMode.light,
+            Icons.light_mode_outlined, tp, sp),
+        _tOpt(context, 'Oscuro',  ThemeMode.dark,
+            Icons.dark_mode_outlined, tp, sp),
       ]),
     ));
   }
@@ -94,21 +115,25 @@ class StudentHomeScreen extends StatelessWidget {
       IconData icon, ThemeProvider tp, SettingsProvider sp) {
     final sel = tp.themeMode == mode;
     return ListTile(
-      leading: Icon(icon, color: sel ? AppColors.primaryPurple : AppColors.textSecondary),
+      leading: Icon(icon,
+          color: sel ? AppColors.primaryPurple : AppColors.textSecondary),
       title: Text(label),
-      trailing: sel ? const Icon(Icons.check, color: AppColors.primaryPurple) : null,
+      trailing: sel
+          ? const Icon(Icons.check, color: AppColors.primaryPurple) : null,
       onTap: () { tp.setTheme(label); sp.setTheme(label); Navigator.pop(context); },
     );
   }
 
-  void _handleLogout(BuildContext context) {
+  void _handleLogout(BuildContext context) =>
     showDialog(context: context, builder: (_) => AlertDialog(
       title: const Text('Cerrar sesión'),
       content: const Text('¿Seguro que quieres salir?'),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        TextButton(onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
         ElevatedButton(
           onPressed: () {
+            context.read<StudentProvider>().limpiar();
             context.read<AuthProvider>().logout();
             Navigator.pop(context);
             context.go(AppRoutes.welcome);
@@ -118,9 +143,8 @@ class StudentHomeScreen extends StatelessWidget {
         ),
       ],
     ));
-  }
 
-  // ── Swipe stack ───────────────────────────────────────────────────────────
+  // ── Swipe stack con gestura real ──────────────────────────────────────────
   Widget _buildSwipeStack(BuildContext context, StudentProvider p) {
     final v      = p.currentVacancy!;
     final userId = context.read<AuthProvider>().usuario?.id ?? 0;
@@ -128,18 +152,23 @@ class StudentHomeScreen extends StatelessWidget {
     return Column(children: [
       Expanded(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: _VacancyCard(vacante: v),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: _SwipeCard(
+            key: ValueKey(v['id']),   // ← re-crea la tarjeta en cada vacante
+            vacante: v,
+            onLike:    () => _onLike(context, p, userId, v),
+            onDislike: () => p.dislikeVacancy(userId),
+          ),
         ),
       ),
+      // Botones de swipe
       Padding(
-        padding: const EdgeInsets.only(bottom: 28, left: 48, right: 48),
+        padding: const EdgeInsets.only(bottom: 24, left: 48, right: 48),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
           _swipeBtn(Icons.close, AppColors.error, 56,
               () => p.dislikeVacancy(userId)),
           _swipeBtn(Icons.favorite, AppColors.accentGreen, 68,
               () => _onLike(context, p, userId, v)),
-          _swipeBtn(Icons.bookmark_border, AppColors.accentBlue, 48, () {}),
         ]),
       ),
     ]);
@@ -154,14 +183,14 @@ class StudentHomeScreen extends StatelessWidget {
       showDialog(context: context, builder: (_) => AlertDialog(
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(gradient: AppColors.purpleGradient,
-                shape: BoxShape.circle),
+            decoration: BoxDecoration(
+                gradient: AppColors.purpleGradient, shape: BoxShape.circle),
             child: const Icon(Icons.favorite, color: Colors.white, size: 48)),
           const SizedBox(height: 16),
-          Text('¡Es un Match! 🎉', style: AppTextStyles.h3.copyWith(
-              color: AppColors.accentGreen)),
+          Text('¡Es un Match! 🎉',
+              style: AppTextStyles.h3.copyWith(color: AppColors.accentGreen)),
           const SizedBox(height: 8),
-          Text('Tú y "${v['titulo'] ?? 'esta empresa'}" se gustaron mutuamente.',
+          Text('"${v['titulo'] ?? 'Esta vacante'}" te eligió',
               style: AppTextStyles.bodyMedium.copyWith(
                   color: AppColors.textSecondary),
               textAlign: TextAlign.center),
@@ -169,10 +198,8 @@ class StudentHomeScreen extends StatelessWidget {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context),
               child: const Text('Seguir viendo')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Ver match'),
-          ),
+          ElevatedButton(onPressed: () => Navigator.pop(context),
+              child: const Text('¡Genial!')),
         ],
       ));
     } else {
@@ -180,7 +207,7 @@ class StudentHomeScreen extends StatelessWidget {
         content: Row(children: [
           const Icon(Icons.thumb_up_outlined, color: Colors.white),
           const SizedBox(width: 12),
-          Expanded(child: Text('Le diste like a "${v['titulo'] ?? 'esta vacante'}"',
+          Expanded(child: Text('Like enviado a "${v['titulo'] ?? 'esta vacante'}"',
               style: const TextStyle(fontWeight: FontWeight.w600))),
         ]),
         backgroundColor: AppColors.primaryPurple,
@@ -194,11 +221,14 @@ class StudentHomeScreen extends StatelessWidget {
   Widget _swipeBtn(IconData icon, Color color, double size, VoidCallback onTap) =>
     GestureDetector(
       onTap: onTap,
-      child: Container(width: size, height: size,
-        decoration: BoxDecoration(color: color.withOpacity(0.12),
-            shape: BoxShape.circle,
-            border: Border.all(color: color.withOpacity(0.3), width: 2)),
-        child: Icon(icon, color: color, size: size * 0.45)),
+      child: Container(
+        width: size, height: size,
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.12), shape: BoxShape.circle,
+          border: Border.all(color: color.withOpacity(0.3), width: 2),
+        ),
+        child: Icon(icon, color: color, size: size * 0.45),
+      ),
     );
 
   // ── Estados ───────────────────────────────────────────────────────────────
@@ -213,8 +243,17 @@ class StudentHomeScreen extends StatelessWidget {
           style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textTertiary),
           textAlign: TextAlign.center),
       const SizedBox(height: 24),
-      ElevatedButton.icon(onPressed: () => p.cargarVacantes(),
-          icon: const Icon(Icons.refresh), label: const Text('Recargar')),
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        ElevatedButton.icon(
+            onPressed: () => p.cargarVacantes(),
+            icon: const Icon(Icons.refresh), label: const Text('Recargar')),
+        const SizedBox(width: 12),
+        if (p.filtroModalidad != null || p.filtroUbicacion != null ||
+            p.filtroSueldoMin != null)
+          OutlinedButton(
+              onPressed: () => p.limpiarFiltros(),
+              child: const Text('Quitar filtros')),
+      ]),
     ]),
   );
 
@@ -222,8 +261,8 @@ class StudentHomeScreen extends StatelessWidget {
     child: Padding(padding: const EdgeInsets.all(32), child: Column(
       mainAxisAlignment: MainAxisAlignment.center, children: [
       Container(padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(gradient: AppColors.purpleGradient,
-              shape: BoxShape.circle),
+          decoration: BoxDecoration(
+              gradient: AppColors.purpleGradient, shape: BoxShape.circle),
           child: const Icon(Icons.lock_outline, size: 60, color: Colors.white)),
       const SizedBox(height: 24),
       Text('Límite diario alcanzado', style: AppTextStyles.h3,
@@ -233,9 +272,9 @@ class StudentHomeScreen extends StatelessWidget {
           style: AppTextStyles.bodyLarge.copyWith(color: AppColors.textSecondary),
           textAlign: TextAlign.center),
       const SizedBox(height: 32),
-      ElevatedButton.icon(onPressed: () => context.push(AppRoutes.premium),
-          icon: const Icon(Icons.star, size: 20),
-          label: const Text('Mejorar a Premium')),
+      ElevatedButton.icon(
+          onPressed: () => context.push(AppRoutes.premium),
+          icon: const Icon(Icons.star), label: const Text('Mejorar a Premium')),
     ])),
   );
 
@@ -249,63 +288,318 @@ class StudentHomeScreen extends StatelessWidget {
       Text('Vuelve mañana para nuevas oportunidades',
           style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textTertiary)),
       const SizedBox(height: 24),
-      ElevatedButton(onPressed: () => p.cargarVacantes(),
-          child: const Text('Recargar vacantes')),
+      ElevatedButton.icon(
+          onPressed: () => p.cargarVacantes(resetIndex: true),
+          icon: const Icon(Icons.refresh), label: const Text('Recargar vacantes')),
     ]),
   );
 
+  // ── Filtros funcionales ───────────────────────────────────────────────────
   void _showFilters(BuildContext context) {
-    showModalBottomSheet(context: context, backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        height: MediaQuery.of(context).size.height * 0.45,
-        decoration: BoxDecoration(color: Theme.of(context).cardColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
-        child: Column(children: [
-          Container(margin: const EdgeInsets.only(top: 12), width: 40, height: 4,
-              decoration: BoxDecoration(color: AppColors.borderLight,
-                  borderRadius: BorderRadius.circular(2))),
-          Padding(padding: const EdgeInsets.all(20),
-            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('Filtros', style: AppTextStyles.h4),
-              TextButton(onPressed: () => Navigator.pop(context),
-                  child: const Text('Listo')),
-            ])),
-          Padding(padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Modalidad', style: AppTextStyles.subtitle1),
-              const SizedBox(height: 12),
-              Wrap(spacing: 8, children: ['Remoto','Híbrido','Presencial']
-                  .map((l) => FilterChip(label: Text(l), selected: false,
-                      onSelected: (_) {})).toList()),
-              const SizedBox(height: 16),
-              Text('Tipo', style: AppTextStyles.subtitle1),
-              const SizedBox(height: 12),
-              Wrap(spacing: 8, children: ['Tiempo completo','Prácticas','Medio tiempo']
-                  .map((l) => FilterChip(label: Text(l), selected: false,
-                      onSelected: (_) {})).toList()),
-            ])),
+    final p = context.read<StudentProvider>();
+    String? modalidadTemp = p.filtroModalidad;
+    String? ubicacionTemp = p.filtroUbicacion;
+    double? sueldoTemp    = p.filtroSueldoMin;
+    final ubicacionCtrl   = TextEditingController(text: p.filtroUbicacion ?? '');
+    final sueldoCtrl      = TextEditingController(
+        text: p.filtroSueldoMin?.toStringAsFixed(0) ?? '');
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setModal) => Container(
+          height: MediaQuery.of(context).size.height * 0.7,
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(children: [
+            // Handle
+            Container(margin: const EdgeInsets.only(top: 12),
+                width: 40, height: 4,
+                decoration: BoxDecoration(color: AppColors.borderLight,
+                    borderRadius: BorderRadius.circular(2))),
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Filtros', style: AppTextStyles.h4),
+                  TextButton(
+                    onPressed: () {
+                      setModal(() {
+                        modalidadTemp = null;
+                        ubicacionTemp = null;
+                        sueldoTemp    = null;
+                        ubicacionCtrl.clear();
+                        sueldoCtrl.clear();
+                      });
+                    },
+                    child: const Text('Limpiar'),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(),
+            Expanded(child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+
+                // ── Modalidad ────────────────────────────────────────────
+                Text('Modalidad', style: AppTextStyles.subtitle1.copyWith(
+                    fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                Wrap(spacing: 8, runSpacing: 8,
+                    children: ['remoto','presencial','hibrido'].map((m) {
+                  final sel = modalidadTemp == m;
+                  return ChoiceChip(
+                    label: Text(_lModal(m)), selected: sel,
+                    onSelected: (_) =>
+                        setModal(() => modalidadTemp = sel ? null : m),
+                    selectedColor: AppColors.primaryPurple,
+                    labelStyle: TextStyle(
+                        color: sel ? Colors.white : null,
+                        fontWeight: FontWeight.w600),
+                  );
+                }).toList()),
+                const SizedBox(height: 24),
+
+                // ── Ubicación ────────────────────────────────────────────
+                Text('Ubicación', style: AppTextStyles.subtitle1.copyWith(
+                    fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: ubicacionCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Ej: Tijuana, Ciudad de México',
+                    prefixIcon: const Icon(Icons.location_on_outlined,
+                        color: AppColors.primaryPurple),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                          color: AppColors.primaryPurple, width: 2)),
+                    filled: true,
+                    fillColor: Theme.of(context).cardColor,
+                    suffixIcon: ubicacionCtrl.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              ubicacionCtrl.clear();
+                              setModal(() => ubicacionTemp = null);
+                            })
+                        : null,
+                  ),
+                  onChanged: (v) =>
+                      setModal(() => ubicacionTemp = v.isEmpty ? null : v),
+                ),
+                const SizedBox(height: 24),
+
+                // ── Sueldo mínimo ────────────────────────────────────────
+                Text('Sueldo mínimo (MXN)', style: AppTextStyles.subtitle1
+                    .copyWith(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: sueldoCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    hintText: 'Ej: 10000',
+                    prefixIcon: const Icon(Icons.attach_money,
+                        color: AppColors.primaryPurple),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                          color: AppColors.primaryPurple, width: 2)),
+                    filled: true,
+                    fillColor: Theme.of(context).cardColor,
+                    suffixIcon: sueldoCtrl.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              sueldoCtrl.clear();
+                              setModal(() => sueldoTemp = null);
+                            })
+                        : null,
+                  ),
+                  onChanged: (v) =>
+                      setModal(() => sueldoTemp = double.tryParse(v)),
+                ),
+                const SizedBox(height: 8),
+                // Rangos rápidos
+                Wrap(spacing: 8, children: [5000.0, 10000.0, 15000.0, 20000.0]
+                    .map((s) {
+                  final sel = sueldoTemp == s;
+                  return ChoiceChip(
+                    label: Text('\$${s.toStringAsFixed(0)}'),
+                    selected: sel,
+                    onSelected: (_) {
+                      setModal(() {
+                        sueldoTemp = sel ? null : s;
+                        sueldoCtrl.text = sel ? '' : s.toStringAsFixed(0);
+                      });
+                    },
+                    selectedColor: AppColors.primaryPurple,
+                    labelStyle: TextStyle(
+                        color: sel ? Colors.white : null,
+                        fontWeight: FontWeight.w600),
+                  );
+                }).toList()),
+              ]),
+            )),
+            // Botón aplicar
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    p.aplicarFiltros(
+                      modalidad: modalidadTemp,
+                      ubicacion: ubicacionTemp,
+                      sueldoMin: sueldoTemp,
+                    );
+                  },
+                  child: const Text('Aplicar filtros'),
+                ),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  String _lModal(String m) {
+    switch (m) {
+      case 'remoto': return 'Remoto';
+      case 'presencial': return 'Presencial';
+      case 'hibrido': return 'Híbrido';
+      default: return m;
+    }
+  }
+}
+
+// ── Tarjeta con swipe gestural ────────────────────────────────────────────────
+class _SwipeCard extends StatefulWidget {
+  final Map<String, dynamic> vacante;
+  final VoidCallback onLike;
+  final VoidCallback onDislike;
+
+  const _SwipeCard({
+    super.key,
+    required this.vacante,
+    required this.onLike,
+    required this.onDislike,
+  });
+
+  @override
+  State<_SwipeCard> createState() => _SwipeCardState();
+}
+
+class _SwipeCardState extends State<_SwipeCard>
+    with SingleTickerProviderStateMixin {
+  Offset _offset = Offset.zero;
+  bool   _isDragging = false;
+
+  static const double _swipeThreshold = 100.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final screenW = MediaQuery.of(context).size.width;
+    final angle   = (_offset.dx / screenW) * 0.4;
+    final opacity = (_offset.dx.abs() / _swipeThreshold).clamp(0.0, 1.0);
+    final isRight = _offset.dx > 0;
+
+    return GestureDetector(
+      onPanStart:  (_) => setState(() => _isDragging = true),
+      onPanUpdate: (d) => setState(() => _offset += d.delta),
+      onPanEnd:    (_) {
+        setState(() => _isDragging = false);
+        if (_offset.dx.abs() >= _swipeThreshold) {
+          // Swipe completado
+          if (_offset.dx > 0) {
+            widget.onLike();
+          } else {
+            widget.onDislike();
+          }
+          setState(() => _offset = Offset.zero);
+        } else {
+          // Regresar al centro
+          setState(() => _offset = Offset.zero);
+        }
+      },
+      child: AnimatedContainer(
+        duration: _isDragging
+            ? Duration.zero : const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        transform: Matrix4.identity()
+          ..translate(_offset.dx, _offset.dy * 0.3)
+          ..rotateZ(angle),
+        child: Stack(children: [
+          // Tarjeta de contenido
+          _buildCardContent(context),
+
+          // Indicador LIKE
+          if (_offset.dx > 20)
+            Positioned(top: 30, left: 20,
+              child: Opacity(opacity: opacity, child: Transform.rotate(
+                angle: -0.3,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.accentGreen,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: Text('LIKE',
+                      style: AppTextStyles.h4.copyWith(
+                          color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ))),
+
+          // Indicador PASS
+          if (_offset.dx < -20)
+            Positioned(top: 30, right: 20,
+              child: Opacity(opacity: opacity, child: Transform.rotate(
+                angle: 0.3,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.error,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: Text('PASS',
+                      style: AppTextStyles.h4.copyWith(
+                          color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ))),
         ]),
       ),
     );
   }
-}
 
-// ── Tarjeta de vacante ────────────────────────────────────────────────────────
-class _VacancyCard extends StatelessWidget {
-  final Map<String, dynamic> vacante;
-  const _VacancyCard({required this.vacante});
-
-  @override
-  Widget build(BuildContext context) {
-    final titulo    = vacante['titulo'] as String? ?? 'Vacante';
-    final modalidad = vacante['modalidad'] as String? ?? '';
-    final ubicacion = vacante['ubicacion'] as String? ?? '';
-    final desc      = vacante['descripcion'] as String? ?? '';
-    final requi     = vacante['requisitos'] as String? ?? '';
-    final minS      = vacante['sueldo_minimo'];
-    final maxS      = vacante['sueldo_maximo'];
-    final moneda    = vacante['moneda'] as String? ?? 'MXN';
-    String salario  = '';
+  Widget _buildCardContent(BuildContext context) {
+    final v       = widget.vacante;
+    final titulo   = v['titulo']      as String? ?? 'Vacante';
+    final modalidad = v['modalidad']  as String? ?? '';
+    final ubicacion = v['ubicacion']  as String? ?? '';
+    final desc     = v['descripcion'] as String? ?? '';
+    final requi    = v['requisitos']  as String? ?? '';
+    final minS     = v['sueldo_minimo'];
+    final maxS     = v['sueldo_maximo'];
+    final moneda   = v['moneda']      as String? ?? 'MXN';
+    String salario = '';
     if (minS != null && maxS != null) salario = '\$$minS – \$$maxS $moneda';
     else if (minS != null)            salario = 'Desde \$$minS $moneda';
 
@@ -314,8 +608,10 @@ class _VacancyCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(24),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08),
-            blurRadius: 20, offset: const Offset(0, 8))],
+        boxShadow: [BoxShadow(
+          color: Colors.black.withOpacity(0.1),
+          blurRadius: 20, offset: const Offset(0, 8),
+        )],
       ),
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -325,19 +621,22 @@ class _VacancyCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppColors.primaryPurple.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(16)),
-              child: const Icon(Icons.business, color: AppColors.primaryPurple, size: 28)),
+              child: const Icon(Icons.business,
+                  color: AppColors.primaryPurple, size: 28)),
             const SizedBox(width: 12),
-            Expanded(child: Text(titulo, style: AppTextStyles.h4.copyWith(
-                fontWeight: FontWeight.bold))),
+            Expanded(child: Text(titulo,
+                style: AppTextStyles.h4.copyWith(fontWeight: FontWeight.bold))),
           ]),
           const SizedBox(height: 16),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            if (modalidad.isNotEmpty) _chip(Icons.work_outline, _lModal(modalidad),
-                AppColors.primaryPurple),
-            if (ubicacion.isNotEmpty) _chip(Icons.location_on_outlined, ubicacion,
-                AppColors.accentBlue),
-            if (salario.isNotEmpty)   _chip(Icons.attach_money, salario,
-                AppColors.accentGreen),
+            if (modalidad.isNotEmpty)
+              _chip(Icons.work_outline, _lModal(modalidad),
+                  AppColors.primaryPurple),
+            if (ubicacion.isNotEmpty)
+              _chip(Icons.location_on_outlined, ubicacion,
+                  AppColors.accentBlue),
+            if (salario.isNotEmpty)
+              _chip(Icons.attach_money, salario, AppColors.accentGreen),
           ]),
           if (desc.isNotEmpty) ...[
             const SizedBox(height: 20),
@@ -355,6 +654,7 @@ class _VacancyCard extends StatelessWidget {
             Text(requi, style: AppTextStyles.bodyMedium.copyWith(
                 color: AppColors.textSecondary, height: 1.6)),
           ],
+          const SizedBox(height: 80), // espacio para no tapar los botones
         ]),
       ),
     );
@@ -362,12 +662,12 @@ class _VacancyCard extends StatelessWidget {
 
   Widget _chip(IconData icon, String label, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    decoration: BoxDecoration(color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20)),
+    decoration: BoxDecoration(
+        color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 13, color: color), const SizedBox(width: 4),
-      Text(label, style: TextStyle(fontSize: 12, color: color,
-          fontWeight: FontWeight.w600)),
+      Text(label, style: TextStyle(
+          fontSize: 12, color: color, fontWeight: FontWeight.w600)),
     ]),
   );
 

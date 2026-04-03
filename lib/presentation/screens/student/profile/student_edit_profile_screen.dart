@@ -15,7 +15,8 @@ class StudentEditProfileScreen extends StatefulWidget {
   const StudentEditProfileScreen({super.key});
 
   @override
-  State<StudentEditProfileScreen> createState() => _StudentEditProfileScreenState();
+  State<StudentEditProfileScreen> createState() =>
+      _StudentEditProfileScreenState();
 }
 
 class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
@@ -28,9 +29,10 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
   late final TextEditingController _bioCtrl;
   late final TextEditingController _ubicacionCtrl;
 
-  String  _nivelAcademico     = 'Licenciatura';
-  String? _modalidadPreferida;
-  final List<String> _skills  = [];
+  String    _nivelAcademico      = 'Licenciatura';
+  String?   _modalidadPreferida;
+  DateTime? _fechaNacimiento;           // ← NUEVO
+  final List<String> _skills = [];
 
   static const _niveles = [
     'Bachillerato', 'Técnico Superior Universitario',
@@ -45,8 +47,14 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
     _institucionCtrl = TextEditingController(text: p?.institucionEducativa ?? '');
     _bioCtrl         = TextEditingController(text: p?.biografia ?? '');
     _ubicacionCtrl   = TextEditingController(text: p?.ubicacion ?? '');
-    _nivelAcademico     = p?.nivelAcademico ?? 'Licenciatura';
-    _modalidadPreferida = p?.modalidadPreferida;
+    _nivelAcademico      = p?.nivelAcademico ?? 'Licenciatura';
+    _modalidadPreferida  = p?.modalidadPreferida;
+
+    // Parsear fecha_nacimiento existente
+    if (p?.fechaNacimiento != null) {
+      try { _fechaNacimiento = DateTime.parse(p!.fechaNacimiento!); } catch (_) {}
+    }
+
     if (p?.habilidades != null && p!.habilidades!.isNotEmpty) {
       _skills.addAll(p.habilidades!.split(',')
           .map((s) => s.trim()).where((s) => s.isNotEmpty));
@@ -63,6 +71,48 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
 
   int? get _userId => context.read<AuthProvider>().usuario?.id;
 
+  // ── Date picker ───────────────────────────────────────────────────────────
+  Future<void> _pickFechaNacimiento() async {
+    final hoy  = DateTime.now();
+    final init = _fechaNacimiento ?? DateTime(hoy.year - 20, 1, 1);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: init,
+      firstDate:   DateTime(1950),
+      lastDate:    DateTime(hoy.year - 15, hoy.month, hoy.day),
+      helpText:    'Fecha de nacimiento',
+      confirmText: 'Confirmar',
+      cancelText:  'Cancelar',
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: ColorScheme.fromSeed(seedColor: AppColors.primaryPurple),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) setState(() => _fechaNacimiento = picked);
+  }
+
+  String get _fechaFormateada {
+    if (_fechaNacimiento == null) return 'Fecha de nacimiento (opcional)';
+    final d = _fechaNacimiento!;
+    final hoy  = DateTime.now();
+    int   edad = hoy.year - d.year;
+    if (hoy.month < d.month || (hoy.month == d.month && hoy.day < d.day)) edad--;
+    const m = ['ene','feb','mar','abr','may','jun',
+                'jul','ago','sep','oct','nov','dic'];
+    return '${d.day} de ${m[d.month - 1]} de ${d.year}  ($edad años)';
+  }
+
+  String? get _fechaIso {
+    if (_fechaNacimiento == null) return null;
+    final d = _fechaNacimiento!;
+    return '${d.year.toString().padLeft(4,'0')}-'
+           '${d.month.toString().padLeft(2,'0')}-'
+           '${d.day.toString().padLeft(2,'0')}';
+  }
+
+  // ── Skills ────────────────────────────────────────────────────────────────
   void _addSkill() {
     final texto = _skillInputCtrl.text.trim();
     if (texto.isEmpty) return;
@@ -71,6 +121,7 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
     if (nuevas.isNotEmpty) { setState(() => _skills.addAll(nuevas)); _skillInputCtrl.clear(); }
   }
 
+  // ── Guardar ───────────────────────────────────────────────────────────────
   Future<void> _guardar() async {
     if (!_formKey.currentState!.validate()) return;
     final id = _userId; if (id == null) return;
@@ -78,21 +129,25 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
       nombreCompleto:       _nombreCtrl.text.trim(),
       institucionEducativa: _institucionCtrl.text.trim(),
       nivelAcademico:       _nivelAcademico,
+      fechaNacimiento:      _fechaIso,
       biografia:     _bioCtrl.text.trim().isNotEmpty ? _bioCtrl.text.trim() : null,
       habilidades:   _skills.isEmpty ? null : _skills.join(', '),
-      ubicacion:     _ubicacionCtrl.text.trim().isNotEmpty ? _ubicacionCtrl.text.trim() : null,
+      ubicacion:     _ubicacionCtrl.text.trim().isNotEmpty
+                       ? _ubicacionCtrl.text.trim() : null,
       modalidadPreferida: _modalidadPreferida,
     );
     if (!mounted) return;
     if (ok) { _snack('Perfil actualizado', AppColors.accentGreen); context.pop(); }
   }
 
+  // ── Media ─────────────────────────────────────────────────────────────────
   Future<void> _pickFoto(ImageSource source) async {
     final id = _userId; if (id == null) return;
     final xfile = await _picker.pickImage(source: source, imageQuality: 85);
     if (xfile == null || !mounted) return;
     final ok = await context.read<PerfilProvider>().subirFoto(id, File(xfile.path));
-    if (mounted) _snack(ok ? 'Foto actualizada' : (context.read<PerfilProvider>().error ?? 'Error'),
+    if (mounted) _snack(
+        ok ? 'Foto actualizada' : (context.read<PerfilProvider>().error ?? 'Error'),
         ok ? AppColors.accentGreen : AppColors.error);
   }
 
@@ -105,10 +160,12 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
   Future<void> _pickCv() async {
     final id = _userId; if (id == null) return;
     final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom, allowedExtensions: ['pdf', 'doc', 'docx']);
+        type: FileType.custom, allowedExtensions: ['pdf','doc','docx']);
     if (result == null || result.files.single.path == null || !mounted) return;
-    final ok = await context.read<PerfilProvider>().subirCv(id, File(result.files.single.path!));
-    if (mounted) _snack(ok ? 'CV subido correctamente' : (context.read<PerfilProvider>().error ?? 'Error'),
+    final ok = await context.read<PerfilProvider>().subirCv(
+        id, File(result.files.single.path!));
+    if (mounted) _snack(
+        ok ? 'CV subido correctamente' : (context.read<PerfilProvider>().error ?? 'Error'),
         ok ? AppColors.accentGreen : AppColors.error);
   }
 
@@ -118,14 +175,16 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
     if (mounted && ok) _snack('CV eliminado', AppColors.accentGreen);
   }
 
-  void _snack(String msg, Color color) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))));
+  void _snack(String msg, Color color) =>
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg), backgroundColor: color,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))));
 
+  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final cardColor = Theme.of(context).cardColor;
-
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.primaryPurple,
@@ -136,7 +195,8 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
             onPressed: p.cargando ? null : _guardar,
             child: p.cargando
                 ? const SizedBox(width: 20, height: 20,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2))
                 : const Text('Guardar',
                     style: TextStyle(color: Colors.white, fontSize: 16,
                         fontWeight: FontWeight.bold)),
@@ -147,7 +207,6 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
         key: _formKey,
         child: ListView(padding: const EdgeInsets.all(16), children: [
 
-          // Error banner
           Consumer<PerfilProvider>(builder: (_, p, __) {
             if (p.error == null) return const SizedBox.shrink();
             return Container(
@@ -157,19 +216,48 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
               child: Text(p.error!, style: TextStyle(color: AppColors.error)));
           }),
 
-          // ── Foto ────────────────────────────────────────────────────────
           _sec('Foto de perfil'), const SizedBox(height: 16),
           _buildFotoSection(cardColor), const SizedBox(height: 24),
 
-          // ── CV ──────────────────────────────────────────────────────────
           _sec('Currículum (CV)'), const SizedBox(height: 16),
           _buildCvSection(cardColor), const SizedBox(height: 32),
 
-          // ── Información personal ─────────────────────────────────────────
           _sec('Información personal'), const SizedBox(height: 16),
-          _field(_nombreCtrl, 'Nombre completo', Icons.person_outline, cardColor,
+          _field(_nombreCtrl, 'Nombre completo *', Icons.person_outline, cardColor,
               validator: (v) => v == null || v.trim().isEmpty ? 'Requerido' : null),
           const SizedBox(height: 16),
+
+          // ── Date picker ────────────────────────────────────────────────
+          GestureDetector(
+            onTap: _pickFechaNacimiento,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _fechaNacimiento != null
+                      ? AppColors.primaryPurple : AppColors.borderLight,
+                  width: _fechaNacimiento != null ? 2 : 1,
+                ),
+              ),
+              child: Row(children: [
+                Icon(Icons.cake_outlined,
+                    color: _fechaNacimiento != null
+                        ? AppColors.primaryPurple : AppColors.textSecondary),
+                const SizedBox(width: 12),
+                Expanded(child: Text(_fechaFormateada,
+                    style: AppTextStyles.bodyMedium.copyWith(
+                      color: _fechaNacimiento != null
+                          ? AppColors.textPrimary : AppColors.textTertiary,
+                    ))),
+                Icon(Icons.calendar_today_outlined,
+                    size: 16, color: AppColors.textSecondary),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 16),
+
           _field(_ubicacionCtrl, 'Ubicación', Icons.location_on_outlined, cardColor,
               hint: 'Ciudad, Estado'),
           const SizedBox(height: 16),
@@ -177,9 +265,9 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
               hint: 'Cuéntale a las empresas sobre ti...', maxLines: 4, maxLength: 300),
           const SizedBox(height: 32),
 
-          // ── Información académica ────────────────────────────────────────
           _sec('Información académica'), const SizedBox(height: 16),
-          _field(_institucionCtrl, 'Institución educativa', Icons.school_outlined, cardColor,
+          _field(_institucionCtrl, 'Institución educativa *',
+              Icons.school_outlined, cardColor,
               validator: (v) => v == null || v.trim().isEmpty ? 'Requerido' : null),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
@@ -190,16 +278,15 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
           ),
           const SizedBox(height: 32),
 
-          // ── Habilidades ──────────────────────────────────────────────────
-          _sec('Habilidades'),
-          const SizedBox(height: 4),
-          Text('Escribe tus habilidades y presiona +. Puedes separar por comas.',
+          _sec('Habilidades'), const SizedBox(height: 4),
+          Text('Escribe tus habilidades y presiona +',
               style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary)),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(child: TextFormField(
               controller: _skillInputCtrl,
-              decoration: _deco('Ej: Excel, Python, Inglés', Icons.bolt_outlined, cardColor),
+              decoration: _deco('Ej: Python, Inglés, Excel',
+                  Icons.bolt_outlined, cardColor),
               onFieldSubmitted: (_) => _addSkill(),
               textInputAction: TextInputAction.done,
             )),
@@ -208,7 +295,8 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
               decoration: BoxDecoration(color: AppColors.primaryPurple,
                   borderRadius: BorderRadius.circular(12)),
               child: IconButton(
-                  icon: const Icon(Icons.add, color: Colors.white), onPressed: _addSkill),
+                  icon: const Icon(Icons.add, color: Colors.white),
+                  onPressed: _addSkill),
             ),
           ]),
           const SizedBox(height: 12),
@@ -224,7 +312,6 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
               )).toList()),
           const SizedBox(height: 32),
 
-          // ── Modalidad ────────────────────────────────────────────────────
           _sec('Modalidad de trabajo'), const SizedBox(height: 12),
           Wrap(spacing: 8, children: ['remoto','presencial','hibrido'].map((m) {
             final sel = _modalidadPreferida == m;
@@ -232,9 +319,8 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
               label: Text(_lModal(m)), selected: sel,
               onSelected: (_) => setState(() => _modalidadPreferida = sel ? null : m),
               selectedColor: AppColors.primaryPurple,
-              labelStyle: TextStyle(color: sel ? Colors.white : null,
-                  fontWeight: FontWeight.w600),
-            );
+              labelStyle: TextStyle(
+                  color: sel ? Colors.white : null, fontWeight: FontWeight.w600));
           }).toList()),
           const SizedBox(height: 40),
 
@@ -244,7 +330,8 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
               onPressed: p.cargando ? null : _guardar,
               child: p.cargando
                   ? const SizedBox(height: 20, width: 20,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
                   : const Text('Guardar cambios'),
             ),
           )),
@@ -254,112 +341,107 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
     );
   }
 
-  // ── Foto section ──────────────────────────────────────────────────────────
-  Widget _buildFotoSection(Color cardColor) => Consumer<PerfilProvider>(builder: (_, p, __) {
-    final fotoUrl = p.perfil?.fotoPerfilUrl;
-    final initials = _nombreCtrl.text.trim().split(' ')
-        .where((s) => s.isNotEmpty).take(2).map((s) => s[0].toUpperCase()).join();
-
-    return Row(children: [
-      Stack(children: [
-        CircleAvatar(
-          radius: 50,
-          backgroundColor: AppColors.primaryPurpleLight,
-          // Image.network con errorBuilder — no crashea si falla el DNS
-          child: (fotoUrl == null || fotoUrl.isEmpty)
-              ? Text(initials.isEmpty ? '?' : initials,
-                  style: AppTextStyles.h2.copyWith(color: Colors.white))
-              : ClipOval(child: Image.network(
-                  fotoUrl,
-                  width: 100, height: 100, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Text(initials.isEmpty ? '?' : initials,
-                      style: AppTextStyles.h2.copyWith(color: Colors.white)),
-                  loadingBuilder: (_, child, progress) =>
-                      progress == null ? child : const CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2),
-                )),
-        ),
-        if (p.uploadingFoto)
-          const Positioned.fill(child: Center(
-            child: CircularProgressIndicator(color: Colors.white))),
-      ]),
-      const SizedBox(width: 20),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        ElevatedButton.icon(
-          onPressed: p.uploadingFoto ? null : _showFotoPicker,
-          icon: const Icon(Icons.camera_alt, size: 18),
-          label: Text(fotoUrl != null ? 'Cambiar foto' : 'Subir foto'),
-          style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 44)),
-        ),
-        if (fotoUrl != null) ...[
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: p.uploadingFoto ? null : _eliminarFoto,
-            icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
-            label: const Text('Eliminar foto', style: TextStyle(color: AppColors.error)),
-            style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 44),
-                side: const BorderSide(color: AppColors.error)),
+  Widget _buildFotoSection(Color cardColor) =>
+    Consumer<PerfilProvider>(builder: (_, p, __) {
+      final fotoUrl = p.perfil?.fotoPerfilUrl;
+      final initials = _nombreCtrl.text.trim().split(' ')
+          .where((s) => s.isNotEmpty).take(2).map((s) => s[0].toUpperCase()).join();
+      return Row(children: [
+        Stack(children: [
+          CircleAvatar(
+            radius: 50, backgroundColor: AppColors.primaryPurpleLight,
+            child: (fotoUrl == null || fotoUrl.isEmpty)
+                ? Text(initials.isEmpty ? '?' : initials,
+                    style: AppTextStyles.h2.copyWith(color: Colors.white))
+                : ClipOval(child: Image.network(fotoUrl,
+                    width: 100, height: 100, fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Text(
+                        initials.isEmpty ? '?' : initials,
+                        style: AppTextStyles.h2.copyWith(color: Colors.white)),
+                    loadingBuilder: (_, child, prog) =>
+                        prog == null ? child : const CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2))),
           ),
-        ],
-      ])),
-    ]);
-  });
-
-  // ── CV section ────────────────────────────────────────────────────────────
-  Widget _buildCvSection(Color cardColor) => Consumer<PerfilProvider>(builder: (_, p, __) {
-    final tieneCv = (p.perfil?.cvUrl ?? '').isNotEmpty;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: cardColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.borderLight)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Icon(tieneCv ? Icons.description : Icons.upload_file,
-              color: AppColors.primaryPurple, size: 28),
-          const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(tieneCv ? 'CV subido' : 'Sin CV',
-                style: AppTextStyles.subtitle1.copyWith(fontWeight: FontWeight.bold)),
-            if (tieneCv)
-              Text(p.perfil?.cvTipoArchivo?.toUpperCase() ?? 'PDF',
-                  style: AppTextStyles.bodySmall.copyWith(color: AppColors.accentGreen)),
-            if (!tieneCv)
-              Text('PDF, DOC o DOCX',
-                  style: AppTextStyles.bodySmall.copyWith(color: AppColors.textSecondary)),
-          ])),
-          if (p.uploadingCv)
-            const SizedBox(width: 24, height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2)),
+          if (p.uploadingFoto)
+            const Positioned.fill(child: Center(
+                child: CircularProgressIndicator(color: Colors.white))),
         ]),
-        const SizedBox(height: 16),
-        ElevatedButton.icon(
-          onPressed: p.uploadingCv ? null : _pickCv,
-          icon: const Icon(Icons.file_upload, size: 18),
-          label: Text(tieneCv ? 'Reemplazar CV' : 'Subir CV (PDF/DOC)'),
-          style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 44)),
-        ),
-        if (tieneCv) ...[
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: p.uploadingCv ? null : _eliminarCv,
-            icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
-            label: const Text('Eliminar CV', style: TextStyle(color: AppColors.error)),
-            style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 44),
-                side: const BorderSide(color: AppColors.error)),
+        const SizedBox(width: 20),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          ElevatedButton.icon(
+            onPressed: p.uploadingFoto ? null : _showFotoPicker,
+            icon: const Icon(Icons.camera_alt, size: 18),
+            label: Text(fotoUrl != null ? 'Cambiar foto' : 'Subir foto'),
+            style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 44)),
           ),
-        ],
-      ]),
-    );
-  });
+          if (fotoUrl != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: p.uploadingFoto ? null : _eliminarFoto,
+              icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+              label: const Text('Eliminar', style: TextStyle(color: AppColors.error)),
+              style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 44),
+                  side: const BorderSide(color: AppColors.error)),
+            ),
+          ],
+        ])),
+      ]);
+    });
+
+  Widget _buildCvSection(Color cardColor) =>
+    Consumer<PerfilProvider>(builder: (_, p, __) {
+      final tieneCv = (p.perfil?.cvUrl ?? '').isNotEmpty;
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: cardColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.borderLight)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(tieneCv ? Icons.description : Icons.upload_file,
+                color: AppColors.primaryPurple, size: 28),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+              Text(tieneCv ? 'CV subido' : 'Sin CV',
+                  style: AppTextStyles.subtitle1.copyWith(fontWeight: FontWeight.bold)),
+              Text(tieneCv
+                  ? (p.perfil?.cvTipoArchivo?.toUpperCase() ?? 'PDF')
+                  : 'PDF, DOC o DOCX',
+                  style: AppTextStyles.bodySmall.copyWith(
+                      color: tieneCv ? AppColors.accentGreen : AppColors.textSecondary)),
+            ])),
+            if (p.uploadingCv) const SizedBox(width: 24, height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+          ]),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: p.uploadingCv ? null : _pickCv,
+            icon: const Icon(Icons.file_upload, size: 18),
+            label: Text(tieneCv ? 'Reemplazar CV' : 'Subir CV'),
+            style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 44)),
+          ),
+          if (tieneCv) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: p.uploadingCv ? null : _eliminarCv,
+              icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
+              label: const Text('Eliminar CV', style: TextStyle(color: AppColors.error)),
+              style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 44),
+                  side: const BorderSide(color: AppColors.error)),
+            ),
+          ],
+        ]),
+      );
+    });
 
   void _showFotoPicker() => showModalBottomSheet(
     context: context, backgroundColor: Colors.transparent,
     builder: (_) => Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      decoration: BoxDecoration(color: Theme.of(context).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
       child: SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
         Container(margin: const EdgeInsets.symmetric(vertical: 12),
             width: 40, height: 4,
@@ -398,16 +480,13 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
           borderSide: const BorderSide(color: AppColors.borderLight)),
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: AppColors.primaryPurple, width: 2)),
-      filled: true,
-      fillColor: cardColor,  // ← se adapta al tema oscuro/claro
+      filled: true, fillColor: cardColor,
     );
 
   String _lModal(String m) {
     switch (m) {
-      case 'remoto':     return 'Remoto';
-      case 'presencial': return 'Presencial';
-      case 'hibrido':    return 'Híbrido';
-      default:           return m;
+      case 'remoto': return 'Remoto'; case 'presencial': return 'Presencial';
+      case 'hibrido': return 'Híbrido'; default: return m;
     }
   }
 }
