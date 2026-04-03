@@ -16,7 +16,8 @@ class StudentShellScreen extends StatefulWidget {
   State<StudentShellScreen> createState() => _StudentShellScreenState();
 }
 
-class _StudentShellScreenState extends State<StudentShellScreen> {
+class _StudentShellScreenState extends State<StudentShellScreen>
+    with WidgetsBindingObserver {
   int _currentIndex = 0;
 
   static const _pages = [
@@ -29,10 +30,37 @@ class _StudentShellScreenState extends State<StudentShellScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Solo cargamos vacantes — las postulaciones se derivan de los matches
-      context.read<StudentProvider>().cargarVacantes();
-    });
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _init());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Recargar cuando la app vuelve al frente
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _recargarHistorial();
+  }
+
+  Future<void> _init() async {
+    final p      = context.read<StudentProvider>();
+    final userId = context.read<AuthProvider>().usuario?.id;
+    // Paralelo: vacantes + historial
+    await Future.wait([
+      p.cargarVacantes(),
+      if (userId != null) p.cargarHistorial(userId),
+    ]);
+  }
+
+  void _recargarHistorial() {
+    final userId = context.read<AuthProvider>().usuario?.id;
+    if (userId != null) {
+      context.read<StudentProvider>().cargarHistorial(userId);
+    }
   }
 
   @override
@@ -41,7 +69,11 @@ class _StudentShellScreenState extends State<StudentShellScreen> {
       body: IndexedStack(index: _currentIndex, children: _pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
+        onTap: (i) {
+          setState(() => _currentIndex = i);
+          // Refrescar historial al entrar a la tab de Actividad
+          if (i == 2) _recargarHistorial();
+        },
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),
@@ -49,9 +81,9 @@ class _StudentShellScreenState extends State<StudentShellScreen> {
             label: 'Inicio',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.work_outline),
-            activeIcon: Icon(Icons.work),
-            label: 'Postulaciones',
+            icon: Icon(Icons.favorite_outline),
+            activeIcon: Icon(Icons.favorite),
+            label: 'Matches',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.history_outlined),

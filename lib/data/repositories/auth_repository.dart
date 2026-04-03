@@ -14,15 +14,10 @@ class AuthRepository {
   static int? _rolEstudianteId;
   static int? _rolEmpresaId;
 
-  Future<int> _getRolEstudianteId() async {
-    if (_rolEstudianteId != null) return _rolEstudianteId!;
-    return (await _storage.getRolEstudianteId()) ?? 2;
-  }
-
-  Future<int> _getRolEmpresaId() async {
-    if (_rolEmpresaId != null) return _rolEmpresaId!;
-    return (await _storage.getRolEmpresaId()) ?? 3;
-  }
+  Future<int> _getRolEstudianteId() async =>
+      _rolEstudianteId ?? (await _storage.getRolEstudianteId()) ?? 2;
+  Future<int> _getRolEmpresaId() async =>
+      _rolEmpresaId ?? (await _storage.getRolEmpresaId()) ?? 3;
 
   // ── Login ─────────────────────────────────────────────────────────────────
   Future<UserModel> login({
@@ -30,9 +25,7 @@ class AuthRepository {
     required String password,
   }) async {
     final json = await _api.post(
-      ApiConstants.login,
-      {'email': email, 'password': password},
-    );
+        ApiConstants.login, {'email': email, 'password': password});
     final tokens = TokenResponse.fromJson(json);
     await _storage.guardarTokens(
       accessToken:  tokens.accessToken,
@@ -40,27 +33,22 @@ class AuthRepository {
       tokenType:    tokens.tokenType,
     );
 
-    // Usar GET /user/me — ahora SÍ existe y devuelve perfil embebido
     UserModel user;
     try {
-      final me = await _api.get('/user/me', auth: true);
+      final me  = await _api.get('/user/me', auth: true);
       final map = me is Map<String, dynamic> ? me : (me['data'] as Map<String, dynamic>);
       user = UserModel.fromJson(map);
     } catch (_) {
-      // Fallback: decodificar JWT localmente
       user = _userFromJwt(tokens.accessToken, email);
     }
 
     await _storage.guardarUsuario(
-      userId:   user.id,
-      email:    user.email,
-      rolId:    user.rolId,
-      esPremium: user.esPremium,
+      userId: user.id, email: user.email,
+      rolId: user.rolId, esPremium: user.esPremium,
     );
     return user;
   }
 
-  // ── Decodificar JWT (fallback) ────────────────────────────────────────────
   UserModel _userFromJwt(String accessToken, String email) {
     try {
       final parts = accessToken.split('.');
@@ -68,72 +56,77 @@ class AuthRepository {
       String payload = parts[1].replaceAll('-', '+').replaceAll('_', '/');
       switch (payload.length % 4) {
         case 2: payload += '=='; break;
-        case 3: payload += '='; break;
+        case 3: payload += '=';  break;
       }
       final claims = jsonDecode(utf8.decode(base64Decode(payload))) as Map<String, dynamic>;
       final userId = int.tryParse(claims['sub']?.toString() ?? '0') ?? 0;
       final role   = claims['role']?.toString() ?? 'estudiante';
-      int rolId;
-      if (role == 'empresa')     rolId = _rolEmpresaId ?? 3;
-      else if (role == 'admin')  rolId = 1;
-      else                       rolId = _rolEstudianteId ?? 2;
+      final rolId  = role == 'empresa' ? (_rolEmpresaId ?? 3)
+                   : role == 'admin'   ? 1
+                   : (_rolEstudianteId ?? 2);
       return UserModel(id: userId, email: email, rolId: rolId, esPremium: false);
     } catch (_) {
       return UserModel(id: 0, email: email, rolId: 2, esPremium: false);
     }
   }
 
-  // ── Restaurar sesión — 100% local ─────────────────────────────────────────
+  // ── Restaurar sesión ──────────────────────────────────────────────────────
   Future<UserModel?> restaurarSesion() async {
     try {
-      final accessToken = await _storage.getAccessToken();
-      if (accessToken == null || accessToken.isEmpty) return null;
-      if (_tokenExpirado(accessToken)) { await _storage.limpiar(); return null; }
-
-      final userId   = await _storage.getUserId();
-      final email    = await _storage.getUserEmail();
-      final rolId    = await _storage.getRolId();
+      final token = await _storage.getAccessToken();
+      if (token == null || token.isEmpty || _tokenExpirado(token)) {
+        await _storage.limpiar(); return null;
+      }
+      final userId    = await _storage.getUserId();
+      final email     = await _storage.getUserEmail();
+      final rolId     = await _storage.getRolId();
       final esPremium = await _storage.getEsPremium();
       if (userId == null || email == null || rolId == null) return null;
-
       return UserModel(id: userId, email: email, rolId: rolId, esPremium: esPremium);
-    } catch (_) {
-      await _storage.limpiar();
-      return null;
-    }
+    } catch (_) { await _storage.limpiar(); return null; }
   }
 
   bool _tokenExpirado(String token) {
     try {
       final parts = token.split('.');
       if (parts.length != 3) return true;
-      String payload = parts[1].replaceAll('-', '+').replaceAll('_', '/');
-      switch (payload.length % 4) {
-        case 2: payload += '=='; break;
-        case 3: payload += '='; break;
-      }
-      final claims = jsonDecode(utf8.decode(base64Decode(payload))) as Map<String, dynamic>;
-      final exp = claims['exp'] as int?;
+      String p = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+      switch (p.length % 4) { case 2: p += '=='; break; case 3: p += '='; break; }
+      final claims = jsonDecode(utf8.decode(base64Decode(p))) as Map<String, dynamic>;
+      final exp    = claims['exp'] as int?;
       if (exp == null) return false;
-      return DateTime.now().isAfter(DateTime.fromMillisecondsSinceEpoch(exp * 1000));
+      return DateTime.now().isAfter(
+          DateTime.fromMillisecondsSinceEpoch(exp * 1000));
     } catch (_) { return true; }
   }
 
   // ── Registro Estudiante ───────────────────────────────────────────────────
   Future<UserModel> registrarEstudiante({
-    required String email, required String password,
-    required String nombreCompleto, required String institucionEducativa,
-    required String nivelAcademico, String? biografia,
-    String? habilidades, String? ubicacion, String? modalidadPreferida,
+    required String email,
+    required String password,
+    required String nombreCompleto,
+    required String institucionEducativa,
+    required String nivelAcademico,
+    required String fechaNacimiento,   // ← NUEVO requerido
+    String? biografia,
+    String? habilidades,
+    String? ubicacion,
+    String? modalidadPreferida,
   }) async {
     final rolId = await _getRolEstudianteId();
-    final body = UserCreateRequest(
-      email: email, password: password, rolId: rolId,
+    final body  = UserCreateRequest(
+      email:    email,
+      password: password,
+      rolId:    rolId,
       perfilEstudiante: PerfilEstudianteCreateDto(
-        nombreCompleto: nombreCompleto, institucionEducativa: institucionEducativa,
-        nivelAcademico: nivelAcademico, biografia: biografia,
-        habilidades: habilidades, ubicacion: ubicacion,
-        modalidadPreferida: modalidadPreferida,
+        nombreCompleto:       nombreCompleto,
+        institucionEducativa: institucionEducativa,
+        nivelAcademico:       nivelAcademico,
+        fechaNacimiento:      fechaNacimiento,
+        biografia:            biografia,
+        habilidades:          habilidades,
+        ubicacion:            ubicacion,
+        modalidadPreferida:   modalidadPreferida,
       ),
     ).toJson();
     await _api.post(ApiConstants.createUser, body, auth: false);
@@ -144,16 +137,25 @@ class AuthRepository {
 
   // ── Registro Empresa ──────────────────────────────────────────────────────
   Future<UserModel> registrarEmpresa({
-    required String email, required String password,
-    required String nombreComercial, String? sector,
-    String? descripcion, String? sitioWeb, String? ubicacionSede,
+    required String email,
+    required String password,
+    required String nombreComercial,
+    String? sector,
+    String? descripcion,
+    String? sitioWeb,
+    String? ubicacionSede,
   }) async {
     final rolId = await _getRolEmpresaId();
-    final body = UserCreateRequest(
-      email: email, password: password, rolId: rolId,
+    final body  = UserCreateRequest(
+      email:    email,
+      password: password,
+      rolId:    rolId,
       perfilEmpresa: PerfilEmpresaCreateDto(
-        nombreComercial: nombreComercial, sector: sector,
-        descripcion: descripcion, sitioWeb: sitioWeb, ubicacionSede: ubicacionSede,
+        nombreComercial: nombreComercial,
+        sector:          sector,
+        descripcion:     descripcion,
+        sitioWeb:        sitioWeb,
+        ubicacionSede:   ubicacionSede,
       ),
     ).toJson();
     await _api.post(ApiConstants.createUser, body, auth: false);
@@ -163,28 +165,13 @@ class AuthRepository {
   }
 
   // ── Cambiar contraseña ────────────────────────────────────────────────────
-  // POST /user/me/password — NUEVO endpoint
   Future<void> cambiarPassword({
     required String currentPassword,
     required String newPassword,
   }) async {
-    await _api.post(
-      '/user/me/password',
-      {'current_password': currentPassword, 'new_password': newPassword},
-      auth: true,
-    );
-  }
-
-  // ── Refresh ───────────────────────────────────────────────────────────────
-  Future<void> refreshToken() async {
-    final rt = await _storage.getRefreshToken();
-    if (rt == null) throw Exception('No hay refresh token');
-    final json = await _api.post(ApiConstants.refresh, {'refresh_token': rt});
-    final tokens = TokenResponse.fromJson(json);
-    await _storage.guardarTokens(
-      accessToken: tokens.accessToken, refreshToken: tokens.refreshToken,
-      tokenType: tokens.tokenType,
-    );
+    await _api.post('/user/me/password',
+        {'current_password': currentPassword, 'new_password': newPassword},
+        auth: true);
   }
 
   // ── Logout ────────────────────────────────────────────────────────────────

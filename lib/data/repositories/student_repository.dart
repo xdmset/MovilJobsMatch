@@ -9,11 +9,8 @@ class StudentRepository {
 
   // ── Vacantes ──────────────────────────────────────────────────────────────
   Future<List<Map<String, dynamic>>> getVacantes({
-    String? modalidad,
-    String? ubicacion,
-    double? sueldoMin,
-    int skip = 0,
-    int limit = 100,
+    String? modalidad, String? ubicacion, double? sueldoMin,
+    int skip = 0, int limit = 100,
   }) async {
     final query = <String, String>{
       'skip': skip.toString(), 'limit': limit.toString(),
@@ -26,29 +23,44 @@ class StudentRepository {
     return lista.cast<Map<String, dynamic>>();
   }
 
-  // ── Registrar swipe ───────────────────────────────────────────────────────
-  // Devuelve MatchResponse si hay match, null si no
-  // { id, estudiante_id, vacante_id, fecha_match }
+  // ── Registrar vista de vacante ────────────────────────────────────────────
+  // POST /vacante/{vacante_id}/view — sin body
+  Future<void> registrarVista(int vacanteId) async {
+    try {
+      await _api.post('/vacante/$vacanteId/view', {}, auth: true);
+    } catch (_) {} // falla silencioso
+  }
+
+  // ── Historial del estudiante desde el servidor ────────────────────────────
+  // GET /vacante/historial/estudiante/{estudiante_id}
+  // Respuesta: List<VacanteHistorialEstudiante>
+  // { titulo, descripcion, modalidad, ubicacion, sueldo_minimo, sueldo_maximo,
+  //   moneda, estado, id, empresa_id, fecha_publicacion,
+  //   primera_visualizacion, ultima_visualizacion, total_visualizaciones,
+  //   le_dio_like (bool), fecha_like }
+  Future<List<Map<String, dynamic>>> getHistorialEstudiante(
+      int estudianteId) async {
+    final raw = await _api.get(
+        '/vacante/historial/estudiante/$estudianteId', auth: true);
+    final lista = raw is List ? raw : (raw['data'] as List? ?? []);
+    return lista.cast<Map<String, dynamic>>();
+  }
+
+  // ── Swipe ─────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>?> registrarSwipe(
       int estudianteId, int vacanteId, bool interes) async {
     try {
-      final res = await _api.post(
-        '/swipes/$estudianteId',
-        {'vacante_id': vacanteId, 'interes_estudiante': interes},
-        auth: true,
-      );
-      // Si el backend devuelve un match, res tendrá { id, estudiante_id, vacante_id, fecha_match }
+      final res = await _api.post('/swipes/$estudianteId',
+          {'vacante_id': vacanteId, 'interes_estudiante': interes},
+          auth: true);
       if (res != null && res is Map<String, dynamic> && res.containsKey('id')) {
         return res;
       }
       return null;
-    } catch (_) {
-      return null;
-    }
+    } catch (_) { return null; }
   }
 
-  // ── Postulación manual (después de match) ─────────────────────────────────
-  // POST /postulaciones/web — { estudiante_id, vacante_id }
+  // ── Crear postulación manual ──────────────────────────────────────────────
   Future<Map<String, dynamic>?> crearPostulacion(
       int estudianteId, int vacanteId) async {
     try {
@@ -56,18 +68,6 @@ class StudentRepository {
           {'estudiante_id': estudianteId, 'vacante_id': vacanteId},
           auth: true);
       return res is Map<String, dynamic> ? res : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  // ── Vacante por ID (para mostrar detalles en postulación) ─────────────────
-  Future<Map<String, dynamic>?> getVacante(int vacanteId) async {
-    try {
-      final raw = await _api.get('/vacante/$vacanteId', auth: true);
-      return raw is Map<String, dynamic> ? raw : null;
-    } catch (_) {
-      return null;
-    }
+    } catch (_) { return null; }
   }
 }
