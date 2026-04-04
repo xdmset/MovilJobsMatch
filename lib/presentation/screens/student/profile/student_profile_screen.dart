@@ -1,8 +1,10 @@
 // lib/presentation/screens/student/profile/student_profile_screen.dart
+// Agrega url_launcher: ^6.2.0 en pubspec.yaml
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../../core/constants/app_routes.dart';
@@ -33,6 +35,33 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
     if (id != null) context.read<PerfilProvider>().cargarPerfil(id);
   }
 
+  // ── Abrir CV ──────────────────────────────────────────────────────────────
+  Future<void> _abrirCv(String? cvUrl) async {
+    if (cvUrl == null || cvUrl.isEmpty) return;
+    try {
+      final uri = Uri.parse(cvUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('No se puede abrir el CV. Intenta más tarde.'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error al abrir el CV: $e'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -60,50 +89,48 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
     );
   }
 
-  SliverAppBar _buildAppBar(BuildContext context) {
-    return SliverAppBar(
-      expandedHeight: 200,
-      floating: false,
-      pinned: true,
-      automaticallyImplyLeading: false,
-      backgroundColor: AppColors.primaryPurple,
-      flexibleSpace: FlexibleSpaceBar(
-        background: Container(
-          decoration: const BoxDecoration(gradient: AppColors.purpleGradient),
-        ),
+  SliverAppBar _buildAppBar(BuildContext context) => SliverAppBar(
+    expandedHeight: 200,
+    floating: false, pinned: true,
+    automaticallyImplyLeading: false,
+    backgroundColor: AppColors.primaryPurple,
+    flexibleSpace: FlexibleSpaceBar(
+      background: Container(
+          decoration: const BoxDecoration(gradient: AppColors.purpleGradient)),
+    ),
+    actions: [
+      IconButton(
+        icon: const Icon(Icons.edit, color: Colors.white),
+        onPressed: () async {
+          await context.push(AppRoutes.editProfile);
+          if (mounted) _cargarPerfil();
+        },
       ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.edit, color: Colors.white),
-          onPressed: () async {
-            await context.push(AppRoutes.editProfile);
-            if (mounted) _cargarPerfil();
-          },
-        ),
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert, color: Colors.white),
-          onSelected: (v) {
-            if (v == 'settings') context.push(AppRoutes.settings);
-            if (v == 'logout')   _handleLogout(context);
-          },
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'settings',
-                child: Row(children: [Icon(Icons.settings_outlined),
-                  SizedBox(width: 12), Text('Configuración')])),
-            PopupMenuItem(value: 'logout',
-                child: Row(children: [Icon(Icons.logout, color: AppColors.error),
-                  SizedBox(width: 12),
-                  Text('Cerrar sesión', style: TextStyle(color: AppColors.error))])),
-          ],
-        ),
-      ],
-    );
-  }
+      PopupMenuButton<String>(
+        icon: const Icon(Icons.more_vert, color: Colors.white),
+        onSelected: (v) {
+          if (v == 'settings') context.push(AppRoutes.settings);
+          if (v == 'logout')   _handleLogout(context);
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'settings',
+              child: Row(children: [Icon(Icons.settings_outlined),
+                SizedBox(width: 12), Text('Configuración')])),
+          PopupMenuItem(value: 'logout',
+              child: Row(children: [Icon(Icons.logout, color: AppColors.error),
+                SizedBox(width: 12),
+                Text('Cerrar sesión', style: TextStyle(color: AppColors.error))])),
+        ],
+      ),
+    ],
+  );
 
   Widget _buildContent(BuildContext context, PerfilEstudiante perfil) {
-    final cardColor = Theme.of(context).cardColor;
-    // matches en lugar de postulaciones — es lo que devuelve el nuevo provider
-    final matchCount = context.read<StudentProvider>().matches.length;
+    final cardColor     = Theme.of(context).cardColor;
+    final matchCount    = context.read<StudentProvider>().matches.length;
+    final swipeCount    = context.read<StudentProvider>().historial.length;
+    final likeCount     = context.read<StudentProvider>().historial
+        .where((h) => h['tipo'] == 'like').length;
 
     final habilidades = (perfil.habilidades ?? '')
         .split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
@@ -117,8 +144,21 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
         fotoUrl:    perfil.fotoPerfilUrl,
       ),
       const SizedBox(height: 16),
+
+      // Edad si existe
+      if (perfil.edad != null) ...[
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _chip(Icons.cake_outlined,
+              '${perfil.edad} años', AppColors.accentBlue),
+        ),
+        const SizedBox(height: 12),
+      ],
+
       _buildInfoRow(context, perfil),
       const SizedBox(height: 16),
+
+      // Bio
       if (perfil.biografia != null && perfil.biografia!.isNotEmpty) ...[
         _buildCard(cardColor, Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -131,19 +171,25 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
         )),
         const SizedBox(height: 16),
       ],
-      _buildStats(cardColor, matchCount),
+
+      // Stats
+      _buildStats(cardColor, matchCount, likeCount, swipeCount),
       const SizedBox(height: 16),
+
+      // Habilidades
       if (habilidades.isNotEmpty) ...[
         SkillsSection(skills: habilidades),
         const SizedBox(height: 16),
       ],
+
+      // CV — con botón para abrirlo
       _buildCvSection(context, cardColor, perfil.cvUrl),
       const SizedBox(height: 24),
     ]);
   }
 
-  Widget _buildInfoRow(BuildContext context, PerfilEstudiante perfil) {
-    return Padding(
+  Widget _buildInfoRow(BuildContext context, PerfilEstudiante perfil) =>
+    Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(children: [
         if (perfil.ubicacion != null && perfil.ubicacion!.isNotEmpty)
@@ -156,7 +202,6 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
               _lModal(perfil.modalidadPreferida!), AppColors.accentGreen)),
       ]),
     );
-  }
 
   Widget _chip(IconData icon, String label, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -170,24 +215,20 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
     ]),
   );
 
-  Widget _buildStats(Color cardColor, int matchCount) {
-    return Padding(
+  Widget _buildStats(Color cardColor, int matches, int likes, int swipes) =>
+    Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(children: [
         Expanded(child: _statCard(cardColor, Icons.favorite_outline,
-            matchCount.toString(), 'Matches', AppColors.accentGreen)),
-        const SizedBox(width: 12),
-        Expanded(child: _statCard(cardColor, Icons.history_outlined,
-            context.read<StudentProvider>().historial.length.toString(),
-            'Swipes', AppColors.accentBlue)),
+            matches.toString(), 'Matches', AppColors.accentGreen)),
         const SizedBox(width: 12),
         Expanded(child: _statCard(cardColor, Icons.thumb_up_outlined,
-            context.read<StudentProvider>().historial
-                .where((h) => h['tipo'] == 'like').length.toString(),
-            'Likes', AppColors.primaryPurple)),
+            likes.toString(), 'Likes', AppColors.primaryPurple)),
+        const SizedBox(width: 12),
+        Expanded(child: _statCard(cardColor, Icons.history_outlined,
+            swipes.toString(), 'Vistas', AppColors.accentBlue)),
       ]),
     );
-  }
 
   Widget _statCard(Color cardColor, IconData icon, String value,
       String label, Color color) =>
@@ -210,6 +251,7 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
       ]),
     );
 
+  // ── CV con botón de apertura ──────────────────────────────────────────────
   Widget _buildCvSection(BuildContext context, Color cardColor, String? cvUrl) {
     final tieneCv = cvUrl != null && cvUrl.isNotEmpty;
     return Container(
@@ -220,25 +262,36 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
           border: Border.all(color: AppColors.borderLight, width: 2)),
       child: Row(children: [
         Container(padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-                color: AppColors.primaryPurple.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12)),
-            child: const Icon(Icons.description_outlined,
-                size: 32, color: AppColors.primaryPurple)),
+          decoration: BoxDecoration(
+              color: AppColors.primaryPurple.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12)),
+          child: const Icon(Icons.description_outlined,
+              size: 32, color: AppColors.primaryPurple)),
         const SizedBox(width: 16),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-          Text('Currículum', style: AppTextStyles.subtitle1.copyWith(
-              fontWeight: FontWeight.bold)),
+          Text('Currículum',
+              style: AppTextStyles.subtitle1.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           Text(
-            tieneCv ? 'CV disponible para empresas' : 'Sin CV — agrégalo en Editar perfil',
+            tieneCv ? 'CV disponible para empresas' : 'Sin CV',
             style: AppTextStyles.bodySmall.copyWith(
-                color: tieneCv ? AppColors.accentGreen : AppColors.textSecondary)),
+                color: tieneCv ? AppColors.accentGreen : AppColors.textSecondary),
+          ),
         ])),
+        const SizedBox(width: 8),
         if (tieneCv)
-          const Icon(Icons.check_circle, color: AppColors.accentGreen, size: 24),
-        if (!tieneCv)
+          // Botón para abrir el PDF
+          ElevatedButton.icon(
+            onPressed: () => _abrirCv(cvUrl),
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: const Text('Ver CV'),
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(0, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+          )
+        else
           TextButton(
             onPressed: () async {
               await context.push(AppRoutes.editProfile);
@@ -280,6 +333,7 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
             child: const Text('Cancelar')),
         ElevatedButton(
           onPressed: () {
+            context.read<StudentProvider>().limpiar();
             context.read<AuthProvider>().logout();
             Navigator.pop(context);
             context.go(AppRoutes.welcome);
@@ -292,10 +346,10 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
 
   String _lModal(String m) {
     switch (m) {
-      case 'remoto':     return 'Remoto';
+      case 'remoto': return 'Remoto';
       case 'presencial': return 'Presencial';
-      case 'hibrido':    return 'Híbrido';
-      default:           return m;
+      case 'hibrido': return 'Híbrido';
+      default: return m;
     }
   }
 }

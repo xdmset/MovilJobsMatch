@@ -40,26 +40,31 @@ class _StudentShellScreenState extends State<StudentShellScreen>
     super.dispose();
   }
 
-  // Recargar cuando la app vuelve al frente
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _recargarHistorial();
+    if (state == AppLifecycleState.resumed) _recargarTodo();
   }
 
   Future<void> _init() async {
-    final p      = context.read<StudentProvider>();
     final userId = context.read<AuthProvider>().usuario?.id;
-    // Paralelo: vacantes + historial
-    await Future.wait([
-      p.cargarVacantes(),
-      if (userId != null) p.cargarHistorial(userId),
-    ]);
+    final p      = context.read<StudentProvider>();
+    if (userId == null) return;
+
+    // ORDEN IMPORTANTE:
+    // 1. Cargar historial primero (obtiene IDs ya vistas)
+    // 2. Luego cargar vacantes (usa esos IDs para sincronizar índice)
+    await p.cargarHistorial(userId);
+    await p.cargarVacantes();
   }
 
-  void _recargarHistorial() {
+  Future<void> _recargarTodo() async {
     final userId = context.read<AuthProvider>().usuario?.id;
-    if (userId != null) {
-      context.read<StudentProvider>().cargarHistorial(userId);
+    final p      = context.read<StudentProvider>();
+    if (userId == null) return;
+    await p.cargarHistorial(userId);
+    // Solo recargar vacantes si se acabaron
+    if (p.currentVacancy == null && !p.hasReachedLimit) {
+      await p.cargarVacantes(resetIndex: true);
     }
   }
 
@@ -71,8 +76,13 @@ class _StudentShellScreenState extends State<StudentShellScreen>
         currentIndex: _currentIndex,
         onTap: (i) {
           setState(() => _currentIndex = i);
-          // Refrescar historial al entrar a la tab de Actividad
-          if (i == 2) _recargarHistorial();
+          // Al entrar a Actividad recargar historial
+          if (i == 2) {
+            final userId = context.read<AuthProvider>().usuario?.id;
+            if (userId != null) {
+              context.read<StudentProvider>().cargarHistorial(userId);
+            }
+          }
         },
         items: const [
           BottomNavigationBarItem(
