@@ -1,3 +1,5 @@
+// lib/presentation/screens/auth/welcome_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_colors.dart';
@@ -12,190 +14,149 @@ class WelcomeScreen extends StatelessWidget {
     return Scaffold(
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.symmetric(horizontal: 28),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const Spacer(),
+              const Spacer(flex: 2),
 
-              // Imagen o ilustración hero
+              // ── Logo / Ilustración ──────────────────────────────────────
               Container(
-                width: 280,
-                height: 280,
+                width: 120, height: 120,
                 decoration: BoxDecoration(
                   gradient: AppColors.purpleGradient,
-                  borderRadius: BorderRadius.circular(40),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.primaryPurple.withOpacity(0.3),
-                      blurRadius: 30,
-                      offset: const Offset(0, 15),
-                    ),
-                  ],
+                  borderRadius: BorderRadius.circular(32),
+                  boxShadow: [BoxShadow(
+                    color: AppColors.primaryPurple.withOpacity(0.35),
+                    blurRadius: 24, offset: const Offset(0, 12),
+                  )],
                 ),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // Ilustración simple con iconos
-                    Positioned(
-                      top: 40,
-                      child: Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.business_center,
-                          size: 50,
-                          color: AppColors.primaryPurple,
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 60,
-                      left: 40,
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.9),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Icon(
-                          Icons.person,
-                          size: 40,
-                          color: AppColors.accentBlue,
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      bottom: 60,
-                      right: 40,
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.9),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Icon(
-                          Icons.favorite,
-                          size: 40,
-                          color: AppColors.accentRed,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                child: const Icon(Icons.work_outline,
+                    color: Colors.white, size: 56),
               ),
+              const SizedBox(height: 32),
 
-              const SizedBox(height: 48),
-
-              // Título
-              Text(
-                'Your Future,',
-                style: AppTextStyles.h1.copyWith(fontSize: 36),
-                textAlign: TextAlign.center,
-              ),
-              Text(
-                'One Swipe Away.',
-                style: AppTextStyles.h1.copyWith(
-                  fontSize: 36,
-                  color: AppColors.primaryPurple,
-                ),
-                textAlign: TextAlign.center,
-              ),
-
-              const SizedBox(height: 16),
-
-              // Subtítulo
-              Text(
-                'Match with top companies and land your dream internship in seconds.',
-                style: AppTextStyles.bodyLarge.copyWith(
-                  color: AppColors.textSecondary,
-                ),
-                textAlign: TextAlign.center,
-              ),
-
-              const Spacer(),
-
-              // Botón Sign up as Student
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => context.push(AppRoutes.registerStudent),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primaryPurple,
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.school, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Sign up as Student',
-                        style: AppTextStyles.button,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
+              // ── Textos ────────────────────────────────────────────────────
+              Text('JobMatch',
+                  style: AppTextStyles.h1.copyWith(
+                      color: AppColors.primaryPurple,
+                      fontWeight: FontWeight.w800)),
               const SizedBox(height: 12),
-
-              // Botón Login as Company
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () => context.push(AppRoutes.registerCompany),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.business, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Login as Company',
-                        style: AppTextStyles.button.copyWith(
-                          color: AppColors.primaryPurple,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              Text(
+                'Conecta con las mejores oportunidades laborales.\nDesliza, haz match y consigue tu próximo empleo.',
+                style: AppTextStyles.bodyLarge.copyWith(
+                    color: AppColors.textSecondary, height: 1.5),
+                textAlign: TextAlign.center,
               ),
 
-              const SizedBox(height: 24),
+              const Spacer(flex: 3),
 
-              // Link para login
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'Already have an account? ',
-                    style: AppTextStyles.bodyMedium.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () => context.push(AppRoutes.login),
-                    child: Text(
-                      'Log in',
-                      style: AppTextStyles.bodyMedium.copyWith(
-                        color: AppColors.primaryPurple,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
+              // ── Sección Estudiante ────────────────────────────────────────
+              _SectionCard(
+                icon: Icons.school_outlined,
+                titulo: 'Soy estudiante o egresado',
+                descripcion: 'Busca prácticas y empleos que se adapten a tu perfil',
+                color: AppColors.primaryPurple,
+                onLogin: () => context.push(AppRoutes.login),
+                onRegister: () => context.push(AppRoutes.registerStudent),
               ),
-
               const SizedBox(height: 16),
+
+              // ── Sección Empresa ───────────────────────────────────────────
+              _SectionCard(
+                icon: Icons.business_outlined,
+                titulo: 'Soy empresa reclutadora',
+                descripcion: 'Publica vacantes y encuentra al candidato ideal',
+                color: AppColors.accentBlue,
+                onLogin: () => context.push(AppRoutes.login),
+                onRegister: () => context.push(AppRoutes.registerCompany),
+              ),
+
+              const Spacer(flex: 2),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  final IconData icon;
+  final String   titulo;
+  final String   descripcion;
+  final Color    color;
+  final VoidCallback onLogin;
+  final VoidCallback onRegister;
+
+  const _SectionCard({
+    required this.icon, required this.titulo, required this.descripcion,
+    required this.color, required this.onLogin, required this.onRegister,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.2), width: 1.5),
+        boxShadow: [BoxShadow(
+          color: color.withOpacity(0.08),
+          blurRadius: 16, offset: const Offset(0, 4),
+        )],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(titulo, style: AppTextStyles.subtitle1.copyWith(
+                  fontWeight: FontWeight.bold)),
+              const SizedBox(height: 2),
+              Text(descripcion, style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary)),
+            ],
+          )),
+        ]),
+        const SizedBox(height: 16),
+        Row(children: [
+          Expanded(child: OutlinedButton(
+            onPressed: onLogin,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: color,
+              side: BorderSide(color: color),
+              minimumSize: const Size(0, 44),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Iniciar sesión'),
+          )),
+          const SizedBox(width: 10),
+          Expanded(child: ElevatedButton(
+            onPressed: onRegister,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: color,
+              minimumSize: const Size(0, 44),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Registrarse',
+                style: TextStyle(color: Colors.white)),
+          )),
+        ]),
+      ]),
     );
   }
 }

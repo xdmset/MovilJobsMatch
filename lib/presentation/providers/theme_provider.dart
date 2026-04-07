@@ -4,48 +4,51 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ThemeProvider extends ChangeNotifier {
-  ThemeMode _themeMode = ThemeMode.system;
-  Locale _locale       = const Locale('es');
+  ThemeMode _themeMode = ThemeMode.light; // default: claro
+  Locale    _locale    = const Locale('es');
 
   ThemeMode get themeMode => _themeMode;
-  Locale get locale       => _locale;
+  Locale    get locale    => _locale;
 
-  /// Llamar en main() antes de runApp
+  static const _keyTheme  = 'jm_theme';
+  static const _keyLocale = 'jm_language';
+
+  // Llamar antes de runApp
   Future<void> cargar() async {
-    final prefs  = await SharedPreferences.getInstance();
-    final tema   = prefs.getString('jm_theme')    ?? 'Sistema';
-    final idioma = prefs.getString('jm_language') ?? 'Español';
-    _themeMode = _temaDesdeString(tema);
-    _locale    = _localeDesdeString(idioma);
-    // Sin notifyListeners — se llama antes de que haya listeners
+    final prefs = await SharedPreferences.getInstance();
+    final t = prefs.getString(_keyTheme) ?? 'Claro';
+    _themeMode = _modeFromString(t);
+    final l = prefs.getString(_keyLocale) ?? 'Español';
+    _locale = l == 'English' ? const Locale('en') : const Locale('es');
   }
 
-  Future<void> setTheme(String tema) async {
-    _themeMode = _temaDesdeString(tema);
+  Future<void> setTheme(String label) async {
+    _themeMode = _modeFromString(label);
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('jm_theme', tema);
+    await prefs.setString(_keyTheme, label);
   }
 
-  Future<void> setLocale(String idioma) async {
-    _locale = _localeDesdeString(idioma);
+  // Resetea a claro y guarda — se llama al hacer logout
+  Future<void> resetToLight() async {
+    _themeMode = ThemeMode.light;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('jm_language', idioma);
+    await prefs.setString(_keyTheme, 'Claro');
   }
 
-  ThemeMode _temaDesdeString(String t) {
-    switch (t) {
-      case 'Claro':  return ThemeMode.light;
+  Future<void> setLocale(String label) async {
+    _locale = label == 'English' ? const Locale('en') : const Locale('es');
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyLocale, label);
+  }
+
+  ThemeMode _modeFromString(String s) {
+    switch (s) {
       case 'Oscuro': return ThemeMode.dark;
-      default:       return ThemeMode.system;
-    }
-  }
-
-  Locale _localeDesdeString(String l) {
-    switch (l) {
-      case 'English': return const Locale('en');
-      default:        return const Locale('es');
+      case 'Sistema': return ThemeMode.system;
+      default:       return ThemeMode.light;
     }
   }
 }

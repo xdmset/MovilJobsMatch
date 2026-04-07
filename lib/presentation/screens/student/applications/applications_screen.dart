@@ -57,8 +57,6 @@ class ApplicationsScreen extends StatelessWidget {
         // Usa setState del shell para cambiar tab — o simplemente pop
         ElevatedButton.icon(
           onPressed: () {
-            // Navegar al tab de inicio dentro del shell
-            final scaffold = Scaffold.maybeOf(context);
             // El IndexedStack no expone el setter, así que usamos
             // el provider para triggerar rebuild en home
             context.read<StudentProvider>().cargarVacantes();

@@ -19,94 +19,17 @@ class CompanyProfileScreen extends StatefulWidget {
 }
 
 class _CompanyProfileScreenState extends State<CompanyProfileScreen> {
-  bool _editando = false;
-
-  late TextEditingController _nombreCtrl;
-  late TextEditingController _sectorCtrl;
-  late TextEditingController _descripcionCtrl;
-  late TextEditingController _sitioWebCtrl;
-  late TextEditingController _ubicacionCtrl;
-
-  static const _sectores = [
-    'Tecnología','Manufactura','Salud','Educación','Finanzas',
-    'Retail / Comercio','Logística','Construcción','Alimentos',
-    'Turismo / Hospitalidad','Medios / Entretenimiento','Consultoría',
-    'Energía','Gobierno / Sector público','Otro',
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _nombreCtrl     = TextEditingController();
-    _sectorCtrl     = TextEditingController();
-    _descripcionCtrl = TextEditingController();
-    _sitioWebCtrl   = TextEditingController();
-    _ubicacionCtrl  = TextEditingController();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initControllers());
-  }
-
-  void _initControllers() {
-    final p = context.read<CompanyProvider>().perfil;
-    if (p != null) {
-      _nombreCtrl.text     = p.nombreComercial;
-      _sectorCtrl.text     = p.sector ?? '';
-      _descripcionCtrl.text = p.descripcion ?? '';
-      _sitioWebCtrl.text   = p.sitioWeb ?? '';
-      _ubicacionCtrl.text  = p.ubicacionSede ?? '';
-    }
-  }
-
-  @override
-  void dispose() {
-    _nombreCtrl.dispose(); _sectorCtrl.dispose();
-    _descripcionCtrl.dispose(); _sitioWebCtrl.dispose();
-    _ubicacionCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _guardar() async {
-    final id = context.read<AuthProvider>().usuario?.id;
-    if (id == null) return;
-    final ok = await context.read<CompanyProvider>().actualizarPerfil(id,
-      nombreComercial: _nombreCtrl.text.trim(),
-      sector:          _sectorCtrl.text.trim().isNotEmpty ? _sectorCtrl.text.trim() : null,
-      descripcion:     _descripcionCtrl.text.trim().isNotEmpty ? _descripcionCtrl.text.trim() : null,
-      sitioWeb:        _sitioWebCtrl.text.trim().isNotEmpty ? _sitioWebCtrl.text.trim() : null,
-      ubicacionSede:   _ubicacionCtrl.text.trim().isNotEmpty ? _ubicacionCtrl.text.trim() : null,
-    );
-    if (!mounted) return;
-    if (ok) {
-      setState(() => _editando = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('Perfil actualizado'),
-        backgroundColor: AppColors.accentGreen,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Perfil de empresa'),
         actions: [
-          if (!_editando)
-            IconButton(icon: const Icon(Icons.edit_outlined),
-                onPressed: () => setState(() => _editando = true)),
-          if (_editando)
-            Consumer<CompanyProvider>(builder: (_, c, __) => TextButton(
-              onPressed: c.updatingPerfil ? null : _guardar,
-              child: c.updatingPerfil
-                  ? const SizedBox(width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Guardar'),
-            )),
+          IconButton(icon: const Icon(Icons.edit_outlined),
+              onPressed: () => context.push(AppRoutes.companyEditProfile)),
           PopupMenuButton<String>(
             onSelected: (v) {
-              if (v == 'settings') context.push(AppRoutes.settings);
+              if (v == 'settings') context.push(AppRoutes.companySettings);
               if (v == 'theme')    _showThemeDialog();
               if (v == 'logout')   _handleLogout();
             },
@@ -143,7 +66,7 @@ class _CompanyProfileScreenState extends State<CompanyProfileScreen> {
                 child: Text(company.error!,
                     style: AppTextStyles.bodyMedium.copyWith(color: AppColors.error)),
               ),
-            _editando ? _buildForm() : _buildInfo(perfil),
+            _buildInfo(perfil),
             const SizedBox(height: 24),
             _buildStats(company),
           ]),
@@ -227,29 +150,6 @@ class _CompanyProfileScreenState extends State<CompanyProfileScreen> {
     ]),
   );
 
-  Widget _buildForm() {
-    String? sectorSeleccionado = _sectorCtrl.text.isNotEmpty
-        ? (_sectores.contains(_sectorCtrl.text) ? _sectorCtrl.text : null) : null;
-
-    return Column(children: [
-      _field(_nombreCtrl, 'Nombre comercial *', Icons.business_outlined),
-      const SizedBox(height: 16),
-      DropdownButtonFormField<String>(
-        value: sectorSeleccionado,
-        decoration: _deco('Sector', Icons.category_outlined),
-        hint: const Text('Selecciona un sector'),
-        items: _sectores.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-        onChanged: (v) => setState(() => _sectorCtrl.text = v ?? ''),
-      ),
-      const SizedBox(height: 16),
-      _field(_descripcionCtrl, 'Descripción', Icons.description_outlined, maxLines: 3),
-      const SizedBox(height: 16),
-      _field(_sitioWebCtrl, 'Sitio web', Icons.language_outlined, hint: 'https://tuempresa.com'),
-      const SizedBox(height: 16),
-      _field(_ubicacionCtrl, 'Ubicación sede', Icons.location_on_outlined, hint: 'Ciudad, Estado'),
-    ]);
-  }
-
   Widget _buildStats(CompanyProvider company) => Row(children: [
     Expanded(child: _statCard(Icons.work_outline,
         company.vacantes.length.toString(), 'Vacantes', AppColors.accentBlue)),
@@ -320,19 +220,4 @@ class _CompanyProfileScreenState extends State<CompanyProfileScreen> {
       ),
     ],
   ));
-
-  Widget _field(TextEditingController ctrl, String label, IconData icon,
-      {String? hint, int maxLines = 1}) =>
-    TextFormField(controller: ctrl, maxLines: maxLines,
-        decoration: _deco(label, icon).copyWith(hintText: hint));
-
-  InputDecoration _deco(String label, IconData icon) => InputDecoration(
-    labelText: label,
-    prefixIcon: Icon(icon, color: AppColors.primaryPurple),
-    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.primaryPurple, width: 2)),
-    filled: true,
-    fillColor: Theme.of(context).cardColor,
-  );
 }

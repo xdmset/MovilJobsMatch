@@ -37,4 +37,19 @@ class MediaRepository {
   Future<void> deleteCvEstudiante(int usuarioId) async {
     await _api.delete('/media/estudiantes/$usuarioId/cv');
   }
+
+  // ── Foto empresa ──────────────────────────────────────────────────────────
+  // Respuesta: { usuario_id, media_type, object_name, bucket, url, content_type, size }
+  Future<String> uploadFotoEmpresa(int usuarioId, File foto) async {
+    final res = await _api.uploadFile(
+      '/media/empresas/$usuarioId/foto',
+      file: foto,
+      fieldName: 'file',
+    );
+    return res['url'] as String? ?? '';
+  }
+
+  Future<void> deleteFotoEmpresa(int usuarioId) async {
+    await _api.delete('/media/empresas/$usuarioId/foto');
+  }
 }

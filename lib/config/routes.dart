@@ -14,8 +14,15 @@ import '../presentation/screens/student/ai_feedback/ai_feedback_screen.dart';
 import '../presentation/screens/company/company_shell_screen.dart';
 import '../presentation/screens/company/vacancies/create_vacancy_screen.dart';
 import '../presentation/screens/company/vacancies/edit_vacancy_screen.dart';
+import '../presentation/screens/company/profile/company_edit_profile_screen.dart';
 import '../presentation/screens/common/premium_screen.dart';
 import '../presentation/screens/common/settings_screen.dart';
+import '../presentation/screens/student/settings/student_settings_screen.dart';
+import '../presentation/screens/student/premium/student_premium_screen.dart';
+import '../presentation/screens/company/settings/company_settings_screen.dart';
+import '../presentation/screens/company/premium/company_premium_screen.dart';
+
+
 
 class AppRouter {
   static final GoRouter router = GoRouter(
@@ -42,6 +49,19 @@ class AppRouter {
             position: Tween(begin: const Offset(1.0, 0.0), end: Offset.zero)
                 .chain(CurveTween(curve: Curves.easeInOut)).animate(anim),
             child: child))),
+
+      GoRoute(path: AppRoutes.studentSettings, name: 'student-settings',
+          builder: (_, __) => const StudentSettingsScreen()),
+      GoRoute(path: AppRoutes.studentPremium, name: 'student-premium',
+          builder: (_, __) => const StudentPremiumScreen()),
+      GoRoute(path: AppRoutes.companyEditProfile, name: 'company-edit-profile',
+          builder: (_, __) => const CompanyEditProfileScreen()),
+      GoRoute(path: AppRoutes.companySettings, name: 'company-settings',
+          builder: (_, __) => const CompanySettingsScreen()),
+      GoRoute(path: AppRoutes.companyPremium, name: 'company-premium',
+          builder: (_, __) => const CompanyPremiumScreen()),
+
+
 
       GoRoute(path: AppRoutes.registerStudent, name: 'register-student',
         pageBuilder: (_, state) => CustomTransitionPage(
@@ -95,7 +115,6 @@ class AppRouter {
 
       // ── Common ─────────────────────────────────────────────────────────────
       GoRoute(path: AppRoutes.settings, name: 'settings', builder: (_, __) => const SettingsScreen()),
-      GoRoute(path: AppRoutes.premium,  name: 'premium',  builder: (_, __) => const PremiumScreen()),
     ],
 
     errorBuilder: (context, state) => Scaffold(
