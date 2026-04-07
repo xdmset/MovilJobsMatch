@@ -1,3 +1,5 @@
+// lib/presentation/screens/auth/login_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -14,231 +16,176 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _isLoading = false;
-  bool _obscurePassword = true;
-  // Selector visual — el rol real viene del servidor en el token
-  String _selectedUserType = 'student';
+  final _formKey   = GlobalKey<FormState>();
+  final _emailCtrl = TextEditingController();
+  final _passCtrl  = TextEditingController();
+  bool  _obscure   = true;
 
   @override
   void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
+    _emailCtrl.dispose(); _passCtrl.dispose(); super.dispose();
   }
 
-  Future<void> _handleLogin() async {
+  Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-
-    final auth = Provider.of<AuthProvider>(context, listen: false);
-    final success = await auth.login(
-      email: _emailController.text.trim(),
-      password: _passwordController.text,
+    final auth = context.read<AuthProvider>();
+    final ok   = await auth.login(
+      email:    _emailCtrl.text.trim(),
+      password: _passCtrl.text,
     );
-
-    setState(() => _isLoading = false);
-
     if (!mounted) return;
-
-    if (success) {
-      // Redirigir según el rol devuelto por el servidor (no el selector visual)
+    if (ok) {
+      // El servidor devuelve el rol real — redirige correctamente
       context.go(auth.esEmpresa ? AppRoutes.companyHome : AppRoutes.studentHome);
     }
-    // Si falla, auth.error se muestra en el banner de abajo
   }
 
   @override
   Widget build(BuildContext context) {
+    final cardColor = Theme.of(context).cardColor;
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
         ),
+        title: const Text('Iniciar sesión'),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.all(24),
           child: Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Título
-                Text(
-                  'Let\'s get you hired!',
-                  style: AppTextStyles.h2,
-                ),
+
+                // ── Header ──────────────────────────────────────────────
+                Text('¡Bienvenido de vuelta!', style: AppTextStyles.h2),
                 const SizedBox(height: 8),
-                Text(
-                  'Create your profile to start matching with top companies and internships.',
-                  style: AppTextStyles.bodyMedium.copyWith(
-                    color: AppColors.textSecondary,
+                Text('Ingresa con tu cuenta — el sistema detectará automáticamente si eres estudiante o empresa.',
+                    style: AppTextStyles.bodyMedium.copyWith(
+                        color: AppColors.textSecondary, height: 1.5)),
+                const SizedBox(height: 32),
+
+                // ── Email ────────────────────────────────────────────────
+                TextFormField(
+                  controller: _emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  textInputAction: TextInputAction.next,
+                  decoration: _deco('Correo electrónico',
+                      Icons.email_outlined, cardColor),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty)
+                      return 'Ingresa tu correo';
+                    if (!v.contains('@') || !v.contains('.'))
+                      return 'Correo no válido';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                // ── Contraseña ───────────────────────────────────────────
+                TextFormField(
+                  controller: _passCtrl,
+                  obscureText: _obscure,
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _login(),
+                  decoration: _deco('Contraseña',
+                      Icons.lock_outline, cardColor).copyWith(
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscure
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined),
+                      onPressed: () => setState(() => _obscure = !_obscure),
+                    ),
+                  ),
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Ingresa tu contraseña';
+                    if (v.length < 6) return 'Mínimo 6 caracteres';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 24),
+
+                // ── Error ────────────────────────────────────────────────
+                Consumer<AuthProvider>(builder: (_, auth, __) {
+                  if (auth.error == null) return const SizedBox.shrink();
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.error.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: AppColors.error.withOpacity(0.3)),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.error_outline,
+                          color: AppColors.error, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(auth.error!,
+                          style: AppTextStyles.bodySmall.copyWith(
+                              color: AppColors.error))),
+                    ]),
+                  );
+                }),
+
+                // ── Botón ────────────────────────────────────────────────
+                Consumer<AuthProvider>(builder: (_, auth, __) =>
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: auth.cargando ? null : _login,
+                      child: auth.cargando
+                          ? const SizedBox(width: 22, height: 22,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2))
+                          : const Text('Entrar'),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 32),
 
-                // User Type Selector (visual only — servidor decide el rol real)
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildUserTypeButton(
-                        'Student',
-                        Icons.school,
-                        'student',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildUserTypeButton(
-                        'Company',
-                        Icons.business,
-                        'company',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-
-                // Email
-                TextFormField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: Icon(Icons.email_outlined),
+                // ── Separador ────────────────────────────────────────────
+                Row(children: [
+                  const Expanded(child: Divider()),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('¿Aún no tienes cuenta?',
+                        style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.textTertiary)),
                   ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your email';
-                    }
-                    if (!value.contains('@')) {
-                      return 'Please enter a valid email';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
+                  const Expanded(child: Divider()),
+                ]),
+                const SizedBox(height: 20),
 
-                // Password
-                TextFormField(
-                  controller: _passwordController,
-                  obscureText: _obscurePassword,
-                  textInputAction: TextInputAction.done,
-                  onFieldSubmitted: (_) => _handleLogin(),
-                  decoration: InputDecoration(
-                    labelText: 'Password',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscurePassword
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
-                      ),
-                      onPressed: () {
-                        setState(() => _obscurePassword = !_obscurePassword);
-                      },
+                // ── Registro estudiante / empresa ────────────────────────
+                Row(children: [
+                  Expanded(child: OutlinedButton.icon(
+                    onPressed: () => context.push(AppRoutes.registerStudent),
+                    icon: const Icon(Icons.school_outlined, size: 18),
+                    label: const Text('Soy estudiante'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your password';
-                    }
-                    if (value.length < 6) {
-                      return 'Password must be at least 6 characters';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Error banner (solo aparece cuando hay error de la API)
-                Consumer<AuthProvider>(
-                  builder: (_, auth, __) {
-                    if (auth.error == null) return const SizedBox.shrink();
-                    return Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.accentRed.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: AppColors.accentRed.withOpacity(0.4),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.error_outline,
-                              color: AppColors.accentRed, size: 18),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              auth.error!,
-                              style: AppTextStyles.bodySmall.copyWith(
-                                color: AppColors.accentRed,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 16),
-
-                // Login Button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _handleLogin,
-                    child: _isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
-                          )
-                        : const Text('Log In'),
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Sign up link
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Don\'t have an account? ',
-                      style: AppTextStyles.bodyMedium.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
+                  )),
+                  const SizedBox(width: 12),
+                  Expanded(child: OutlinedButton.icon(
+                    onPressed: () => context.push(AppRoutes.registerCompany),
+                    icon: const Icon(Icons.business_outlined, size: 18),
+                    label: const Text('Soy empresa'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                      foregroundColor: AppColors.accentBlue,
+                      side: const BorderSide(color: AppColors.accentBlue),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
-                    GestureDetector(
-                      onTap: () => context.push(
-                        _selectedUserType == 'company'
-                            ? AppRoutes.registerCompany
-                            : AppRoutes.registerStudent,
-                      ),
-                      child: Text(
-                        'Sign up',
-                        style: AppTextStyles.bodyMedium.copyWith(
-                          color: AppColors.primaryPurple,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  )),
+                ]),
               ],
             ),
           ),
@@ -247,41 +194,25 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildUserTypeButton(String label, IconData icon, String type) {
-    final isSelected = _selectedUserType == type;
-    return GestureDetector(
-      onTap: () {
-        setState(() => _selectedUserType = type);
-        // Limpiar error previo al cambiar de rol
-        context.read<AuthProvider>().limpiarError();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.primaryPurple : AppColors.surfaceGray,
+  InputDecoration _deco(String label, IconData icon, Color fill) =>
+      InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, color: AppColors.primaryPurple),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected ? AppColors.primaryPurple : Colors.transparent,
-            width: 2,
-          ),
+          borderSide: const BorderSide(color: AppColors.borderLight),
         ),
-        child: Column(
-          children: [
-            Icon(
-              icon,
-              color: isSelected ? Colors.white : AppColors.textSecondary,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: AppTextStyles.bodyMedium.copyWith(
-                color: isSelected ? Colors.white : AppColors.textSecondary,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide:
+              const BorderSide(color: AppColors.primaryPurple, width: 2),
         ),
-      ),
-    );
-  }
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.error),
+        ),
+        filled: true,
+        fillColor: fill,
+      );
 }

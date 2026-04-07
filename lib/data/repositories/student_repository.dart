@@ -53,7 +53,7 @@ class StudentRepository {
       final res = await _api.post('/swipes/$estudianteId',
           {'vacante_id': vacanteId, 'interes_estudiante': interes},
           auth: true);
-      if (res != null && res is Map<String, dynamic> && res.containsKey('id')) {
+      if (res.containsKey('id')) {
         return res;
       }
       return null;
@@ -67,7 +67,7 @@ class StudentRepository {
       final res = await _api.post('/postulaciones/web',
           {'estudiante_id': estudianteId, 'vacante_id': vacanteId},
           auth: true);
-      return res is Map<String, dynamic> ? res : null;
+      return res;
     } catch (_) { return null; }
   }
 }

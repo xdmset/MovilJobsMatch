@@ -1,9 +1,7 @@
 // lib/presentation/screens/company/company_shell_screen.dart
 
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
-import '../../../core/constants/app_routes.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/company_provider.dart';
 import 'home/company_home_tab.dart';

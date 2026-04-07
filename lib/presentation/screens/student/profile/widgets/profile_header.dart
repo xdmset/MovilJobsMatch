@@ -13,15 +13,14 @@ class ProfileHeader extends StatelessWidget {
 
   const ProfileHeader({
     super.key,
-    required this.name,
-    required this.email,
-    required this.university,
-    required this.major,
+    required this.name, required this.email,
+    required this.university, required this.major,
     this.fotoUrl,
   });
 
   String get _initials {
-    final parts = name.trim().split(' ').where((s) => s.isNotEmpty).toList();
+    final parts = name.trim().split(' ')
+        .where((s) => s.isNotEmpty).toList();
     if (parts.isEmpty) return '?';
     if (parts.length == 1) return parts[0][0].toUpperCase();
     return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
@@ -29,85 +28,63 @@ class ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cardColor = Theme.of(context).cardColor;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+      child: Row(children: [
 
-    return Transform.translate(
-      offset: const Offset(0, -50),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Column(children: [
-
-          // ── Avatar ───────────────────────────────────────────────────────
-          Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: cardColor, width: 4),
-              boxShadow: [BoxShadow(
-                color: Colors.black.withOpacity(0.12),
-                blurRadius: 20, offset: const Offset(0, 8),
-              )],
-            ),
-            child: CircleAvatar(
-              radius: 60,
-              backgroundColor: AppColors.primaryPurpleLight,
-              // Image.network con errorBuilder para manejar fallos de DNS/red
-              child: (fotoUrl == null || fotoUrl!.isEmpty)
-                  ? Text(_initials,
-                      style: AppTextStyles.h1.copyWith(color: Colors.white))
-                  : ClipOval(
-                      child: Image.network(
-                        fotoUrl!,
-                        width: 120, height: 120, fit: BoxFit.cover,
-                        // Si el DNS falla (files.jobmatch.com.mx) muestra iniciales
-                        errorBuilder: (_, __, ___) => Text(_initials,
-                            style: AppTextStyles.h1.copyWith(color: Colors.white)),
-                        loadingBuilder: (_, child, progress) => progress == null
-                            ? child
-                            : const SizedBox(width: 120, height: 120,
-                                child: Center(child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2))),
-                      ),
-                    ),
-            ),
+        // ── Avatar circular compacto ────────────────────────────────────
+        Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [BoxShadow(
+              color: AppColors.primaryPurple.withOpacity(0.2),
+              blurRadius: 10, offset: const Offset(0, 3),
+            )],
           ),
-          const SizedBox(height: 16),
+          child: CircleAvatar(
+            radius: 36,
+            backgroundColor: AppColors.primaryPurpleLight,
+            child: (fotoUrl == null || fotoUrl!.isEmpty)
+                ? Text(_initials, style: AppTextStyles.h4.copyWith(
+                    color: Colors.white, fontWeight: FontWeight.bold))
+                : ClipOval(child: Image.network(
+                    fotoUrl!,
+                    width: 72, height: 72, fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Text(_initials,
+                        style: AppTextStyles.h4.copyWith(
+                            color: Colors.white, fontWeight: FontWeight.bold)),
+                    loadingBuilder: (_, child, progress) =>
+                        progress == null ? child
+                            : const CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2),
+                  )),
+          ),
+        ),
+        const SizedBox(width: 14),
 
-          // ── Nombre ───────────────────────────────────────────────────────
-          Text(name, style: AppTextStyles.h2, textAlign: TextAlign.center),
-          const SizedBox(height: 4),
-
-          // ── Email ─────────────────────────────────────────────────────────
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Icon(Icons.email_outlined, size: 14,
-                color: AppColors.textSecondary),
-            const SizedBox(width: 4),
+        // ── Info ────────────────────────────────────────────────────────
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(name, style: AppTextStyles.h4.copyWith(
+                fontWeight: FontWeight.bold)),
+            const SizedBox(height: 2),
             Text(email, style: AppTextStyles.bodySmall.copyWith(
                 color: AppColors.textSecondary)),
-          ]),
-          const SizedBox(height: 12),
-
-          // ── Universidad ───────────────────────────────────────────────────
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: cardColor,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06),
-                  blurRadius: 8, offset: const Offset(0, 2))],
-            ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.school, size: 18, color: AppColors.primaryPurple),
-              const SizedBox(width: 8),
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(university, style: AppTextStyles.bodySmall.copyWith(
-                    fontWeight: FontWeight.bold)),
-                Text(major, style: AppTextStyles.bodySmall.copyWith(
-                    color: AppColors.textSecondary)),
-              ]),
+            const SizedBox(height: 6),
+            Row(children: [
+              const Icon(Icons.school_outlined, size: 13,
+                  color: AppColors.primaryPurple),
+              const SizedBox(width: 4),
+              Expanded(child: Text('$university · $major',
+                  style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.primaryPurple,
+                      fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis)),
             ]),
-          ),
-        ]),
-      ),
+          ],
+        )),
+      ]),
     );
   }
 }

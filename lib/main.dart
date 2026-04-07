@@ -28,7 +28,12 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: themeProvider),
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) {
+          final auth = AuthProvider();
+          // Inyectar ThemeProvider para resetear tema en logout
+          auth.setThemeProvider(themeProvider);
+          return auth;
+        }),
         ChangeNotifierProvider(create: (_) => StudentProvider()),
         ChangeNotifierProvider(create: (_) => VacancyProvider()),
         ChangeNotifierProvider(create: (_) => PerfilProvider()),

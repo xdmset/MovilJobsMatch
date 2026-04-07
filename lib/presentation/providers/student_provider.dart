@@ -10,7 +10,8 @@ class StudentProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _vacantes = [];
   int  _currentIndex  = 0;
   int  _dailySwipes   = 0;
-  final int _maxSwipes = 10;
+  // Subido a 20 para pruebas (era 10)
+  final int _maxSwipes = 20;
   bool _cargandoVacantes = false;
 
   String? _filtroModalidad;
@@ -40,13 +41,10 @@ class StudentProvider extends ChangeNotifier {
   bool _cargandoHistorial = false;
   bool get cargandoHistorial => _cargandoHistorial;
 
-  // IDs de vacantes ya procesadas (vistas+swipeadas en el servidor)
-  // Este Set es la FUENTE DE VERDAD para no repetir vacantes.
+  // IDs de vacantes ya procesadas — fuente de verdad para no repetir
   final Set<int> _vacanteIdsVistas = {};
-  Set<int> get vacanteIdsVistas => Set.unmodifiable(_vacanteIdsVistas);
 
   // ── Cargar historial PRIMERO ──────────────────────────────────────────────
-  // Siempre debe llamarse antes de cargarVacantes al iniciar sesión.
   Future<void> cargarHistorial(int estudianteId) async {
     _cargandoHistorial = true;
     notifyListeners();
@@ -54,15 +52,13 @@ class StudentProvider extends ChangeNotifier {
       final serverItems = await _repo.getHistorialEstudiante(estudianteId);
       debugPrint('[Historial] ${serverItems.length} items del servidor');
 
-      // Reconstruir set de IDs vistos
       _vacanteIdsVistas.clear();
       for (final v in serverItems) {
         final id = v['id'] as int?;
         if (id != null) _vacanteIdsVistas.add(id);
       }
-      debugPrint('[Historial] IDs vistos: $_vacanteIdsVistas');
+      debugPrint('[Historial] IDs vistas: $_vacanteIdsVistas');
 
-      // Convertir al formato interno
       final deServidor = serverItems.map((v) {
         final leDioLike = v['le_dio_like'] as bool? ?? false;
         final ts = leDioLike
@@ -78,7 +74,6 @@ class StudentProvider extends ChangeNotifier {
         };
       }).toList();
 
-      // Conservar items locales que el servidor aún no tiene
       final soloLocales = _historial
           .where((h) => !_vacanteIdsVistas.contains(h['id'] as int?))
           .toList();
@@ -92,11 +87,8 @@ class StudentProvider extends ChangeNotifier {
           (b['timestamp'] as String? ?? '')
               .compareTo(a['timestamp'] as String? ?? ''));
 
-      // Si ya hay vacantes cargadas, sincronizar índice inmediatamente
-      if (_vacantes.isNotEmpty) {
-        _sincronizarIndice();
-        debugPrint('[Historial] Índice sincronizado a $_currentIndex');
-      }
+      if (_vacantes.isNotEmpty) _sincronizarIndice();
+
     } catch (e) {
       debugPrint('[Historial] ERROR: $e');
     }
@@ -104,7 +96,8 @@ class StudentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Cargar vacantes DESPUÉS del historial ─────────────────────────────────
+  // ── Cargar vacantes DESPUÉS ───────────────────────────────────────────────
+  // Filtra las ya vistas para que NUNCA se repitan
   Future<void> cargarVacantes({
     String? modalidad, String? ubicacion, double? sueldoMin,
     bool resetIndex = false,
@@ -112,20 +105,26 @@ class StudentProvider extends ChangeNotifier {
     _cargandoVacantes = true;
     notifyListeners();
     try {
-      _vacantes = await _repo.getVacantes(
+      final todas = await _repo.getVacantes(
         modalidad: modalidad ?? _filtroModalidad,
         ubicacion: ubicacion ?? _filtroUbicacion,
         sueldoMin: sueldoMin ?? _filtroSueldoMin,
       );
-      debugPrint('[Vacantes] ${_vacantes.length} vacantes cargadas');
+
+      // Excluir vacantes ya vistas/procesadas
+      _vacantes = todas.where((v) {
+        final id = v['id'] as int?;
+        return id != null && !_vacanteIdsVistas.contains(id);
+      }).toList();
+
+      debugPrint('[Vacantes] ${todas.length} totales, '
+          '${_vacantes.length} pendientes de ver');
 
       if (resetIndex) {
         _currentIndex = 0;
         _dailySwipes  = 0;
-        debugPrint('[Vacantes] Reset índice a 0');
       } else {
         _sincronizarIndice();
-        debugPrint('[Vacantes] Índice sincronizado a $_currentIndex / ${_vacantes.length}');
       }
     } catch (e) {
       debugPrint('[Vacantes] ERROR: $e');
@@ -135,21 +134,9 @@ class StudentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Avanza el índice hasta la primera vacante NO vista
   void _sincronizarIndice() {
-    if (_vacanteIdsVistas.isEmpty) {
-      _currentIndex = 0;
-      _dailySwipes  = 0;
-      return;
-    }
-    int idx = 0;
-    while (idx < _vacantes.length) {
-      final id = _vacantes[idx]['id'] as int?;
-      if (id == null || !_vacanteIdsVistas.contains(id)) break;
-      idx++;
-    }
-    _currentIndex = idx;
-    // dailySwipes refleja cuántas se han procesado hoy
+    // Con el filtro ya aplicado en cargarVacantes, siempre empezar en 0
+    _currentIndex = 0;
     _dailySwipes  = _vacanteIdsVistas.length.clamp(0, _maxSwipes);
   }
 
@@ -174,7 +161,6 @@ class StudentProvider extends ChangeNotifier {
     final v         = currentVacancy!;
     final vacanteId = v['id'] as int?;
 
-    // 1. Registrar vista (hace que aparezca en historial del servidor)
     if (vacanteId != null) {
       await _repo.registrarVista(vacanteId);
       _vacanteIdsVistas.add(vacanteId);
@@ -183,7 +169,6 @@ class StudentProvider extends ChangeNotifier {
     _dailySwipes++;
     _currentIndex++;
 
-    // 2. Registrar swipe (puede generar match)
     bool esMatch = false;
     if (vacanteId != null) {
       final matchRes = await _repo.registrarSwipe(estudianteId, vacanteId, true);
@@ -193,9 +178,9 @@ class StudentProvider extends ChangeNotifier {
       }
     }
 
-    // 3. Actualizar historial local
     final localItem = <String, dynamic>{
-      ...v, 'tipo': 'like', 'timestamp': DateTime.now().toIso8601String(),
+      ...v, 'tipo': 'like',
+      'timestamp': DateTime.now().toIso8601String(),
       'match': esMatch, 'le_dio_like': true, 'total_visualizaciones': 1,
     };
     _historial.removeWhere((h) => h['id'] == vacanteId);
@@ -210,14 +195,14 @@ class StudentProvider extends ChangeNotifier {
     final v         = currentVacancy!;
     final vacanteId = v['id'] as int?;
 
-    // Registrar vista para que el servidor sepa que se vio
     if (vacanteId != null) {
       await _repo.registrarVista(vacanteId);
       _vacanteIdsVistas.add(vacanteId);
     }
 
     final localItem = <String, dynamic>{
-      ...v, 'tipo': 'dislike', 'timestamp': DateTime.now().toIso8601String(),
+      ...v, 'tipo': 'dislike',
+      'timestamp': DateTime.now().toIso8601String(),
       'match': false, 'le_dio_like': false, 'total_visualizaciones': 1,
     };
     _historial.removeWhere((h) => h['id'] == vacanteId);
@@ -233,17 +218,27 @@ class StudentProvider extends ChangeNotifier {
   }
 
   // ── Cambiar dislike → like ────────────────────────────────────────────────
+  // PARCHE para student_provider.dart
+// Busca el método cambiarOpinion y reemplázalo con este:
+
   Future<bool> cambiarOpinion(int estudianteId, int historialIndex) async {
     if (historialIndex < 0 || historialIndex >= _historial.length) return false;
-    final item      = Map<String, dynamic>.from(_historial[historialIndex]);
+
+    // Copiar la lista para poder mutar (el getter devuelve unmodifiable)
+    final item = Map<String, dynamic>.from(_historial[historialIndex]);
     if (item['tipo'] == 'like') return false;
+
     final vacanteId = item['id'] as int?;
     if (vacanteId == null) return false;
 
-    item['tipo'] = 'like'; item['le_dio_like'] = true;
+    // Actualizar localmente PRIMERO
+    item['tipo']       = 'like';
+    item['le_dio_like'] = true;
+    item['timestamp']  = DateTime.now().toIso8601String();
     _historial[historialIndex] = item;
     notifyListeners();
 
+    // Llamar al servidor
     final matchRes = await _repo.registrarSwipe(estudianteId, vacanteId, true);
     if (matchRes != null) {
       final updated = Map<String, dynamic>.from(_historial[historialIndex]);
@@ -256,11 +251,16 @@ class StudentProvider extends ChangeNotifier {
     return false;
   }
 
+// TAMBIÉN busca deshacerLike y reemplaza con:
   void deshacerLike(int historialIndex) {
     if (historialIndex < 0 || historialIndex >= _historial.length) return;
     final item = Map<String, dynamic>.from(_historial[historialIndex]);
+    // Solo permite descartar likes que NO sean matches
     if (item['tipo'] != 'like' || item['match'] == true) return;
-    item['tipo'] = 'dislike'; item['le_dio_like'] = false; item['match'] = false;
+    item['tipo']       = 'dislike';
+    item['le_dio_like'] = false;
+    item['match']      = false;
+    item['timestamp']  = DateTime.now().toIso8601String();
     _historial[historialIndex] = item;
     notifyListeners();
   }

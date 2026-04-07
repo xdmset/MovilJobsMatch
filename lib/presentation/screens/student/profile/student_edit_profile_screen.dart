@@ -47,7 +47,10 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
     _institucionCtrl = TextEditingController(text: p?.institucionEducativa ?? '');
     _bioCtrl         = TextEditingController(text: p?.biografia ?? '');
     _ubicacionCtrl   = TextEditingController(text: p?.ubicacion ?? '');
-    _nivelAcademico      = p?.nivelAcademico ?? 'Licenciatura';
+    // Validar que el nivel académico esté en la lista
+    _nivelAcademico = _niveles.contains(p?.nivelAcademico)
+        ? p!.nivelAcademico
+        : 'Licenciatura';
     _modalidadPreferida  = p?.modalidadPreferida;
 
     // Parsear fecha_nacimiento existente

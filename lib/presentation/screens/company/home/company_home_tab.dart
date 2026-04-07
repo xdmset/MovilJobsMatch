@@ -114,7 +114,7 @@ class CompanyHomeTab extends StatelessWidget {
 
   void _handleMenu(BuildContext context, String value) {
     switch (value) {
-      case 'settings': context.push(AppRoutes.settings); break;
+      case 'settings': context.push(AppRoutes.companySettings); break;
       case 'theme':    _showThemeDialog(context); break;
       case 'logout':   _handleLogout(context); break;
     }
