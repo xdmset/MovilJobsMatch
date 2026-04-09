@@ -1,16 +1,17 @@
 // lib/presentation/screens/company/vacancies/edit_vacancy_screen.dart
+// PUT /vacante/{vacante_id} — VacanteUpdate (todos opcionales)
+// Pre-llena TODOS los campos desde la vacante existente
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
-import '../../../../core/services/api_service.dart';
-import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 
 class EditVacancyScreen extends StatefulWidget {
-  final int? vacanteId;
+  final int vacanteId;
   const EditVacancyScreen({super.key, required this.vacanteId});
 
   @override
@@ -18,377 +19,510 @@ class EditVacancyScreen extends StatefulWidget {
 }
 
 class _EditVacancyScreenState extends State<EditVacancyScreen> {
-  final _formKey        = GlobalKey<FormState>();
-  final _tituloCtrl     = TextEditingController();
-  final _descCtrl       = TextEditingController();
-  final _requisitosCtrl = TextEditingController();
-  final _salarioMinCtrl = TextEditingController();
-  final _salarioMaxCtrl = TextEditingController();
-  final _ubicacionCtrl  = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
 
-  String? _modalidad;
-  String? _tipoContrato;
-  String  _estado    = 'activa';
-  bool _guardando    = false;
-  bool _cargandoData = true;
+  late final TextEditingController _tituloCtrl;
+  late final TextEditingController _descripcionCtrl;
+  late final TextEditingController _requisitosCtrl;
+  late final TextEditingController _ubicacionCtrl;
+  late final TextEditingController _sueldoMinCtrl;
+  late final TextEditingController _sueldoMaxCtrl;
 
-  static const _modalidades   = ['remoto', 'presencial', 'hibrido'];
-  static const _tiposContrato = ['tiempo_completo', 'medio_tiempo', 'practicas', 'freelance'];
-  static const _estados       = ['activa', 'pausada', 'cerrada'];
+  late String  _modalidad;
+  late String  _moneda;
+  late String  _estado;
+  String?      _tipoContrato;
+
+  bool _inicializado = false;
+
+  static const _modalidades = ['remoto', 'presencial', 'hibrido'];
+  static const _contratos   = [
+    'Tiempo completo', 'Medio tiempo', 'Prácticas profesionales',
+    'Servicio social', 'Por proyecto', 'Temporal', 'Freelance',
+  ];
+  static const _monedas = ['MXN', 'USD', 'EUR'];
+  static const _estados = ['activo', 'inactivo', 'pausado'];
 
   @override
   void initState() {
     super.initState();
+    _tituloCtrl      = TextEditingController();
+    _descripcionCtrl = TextEditingController();
+    _requisitosCtrl  = TextEditingController();
+    _ubicacionCtrl   = TextEditingController();
+    _sueldoMinCtrl   = TextEditingController();
+    _sueldoMaxCtrl   = TextEditingController();
+    _modalidad       = 'presencial';
+    _moneda          = 'MXN';
+    _estado          = 'activo';
+
     WidgetsBinding.instance.addPostFrameCallback((_) => _cargarVacante());
   }
 
   @override
   void dispose() {
-    _tituloCtrl.dispose(); _descCtrl.dispose(); _requisitosCtrl.dispose();
-    _salarioMinCtrl.dispose(); _salarioMaxCtrl.dispose(); _ubicacionCtrl.dispose();
+    _tituloCtrl.dispose(); _descripcionCtrl.dispose();
+    _requisitosCtrl.dispose(); _ubicacionCtrl.dispose();
+    _sueldoMinCtrl.dispose(); _sueldoMaxCtrl.dispose();
     super.dispose();
   }
 
-  // ── Carga datos — primero del provider (ya cargado), si no del API ────────
-  Future<void> _cargarVacante() async {
-    if (widget.vacanteId == null) {
-      setState(() => _cargandoData = false);
+  // ── Pre-cargar desde el provider ──────────────────────────────────────────
+  void _cargarVacante() {
+    final vacante = context.read<CompanyProvider>().vacantes
+        .firstWhere((v) => v['id'] == widget.vacanteId,
+            orElse: () => {});
+
+    if (vacante.isEmpty) {
+      // Si no está en cache, intentar cargarla del servidor
+      _cargarDesdeServidor();
       return;
     }
 
-    // Intentar desde el provider primero (sin llamada extra)
-    final vacantesEnMemoria = context.read<CompanyProvider>().vacantes;
-    final enMemoria = vacantesEnMemoria.where(
-        (v) => v['id'] == widget.vacanteId).toList();
+    _rellenarCampos(vacante);
+  }
 
-    if (enMemoria.isNotEmpty) {
-      _llenarCampos(enMemoria.first);
-      setState(() => _cargandoData = false);
-      return;
-    }
-
-    // Si no está en memoria, llamar al API
+  Future<void> _cargarDesdeServidor() async {
     try {
-      final raw = await ApiService.instance
-          .get('/vacante/${widget.vacanteId}', auth: true);
-      final v = raw is Map<String, dynamic>
-          ? raw
-          : (raw['data'] as Map<String, dynamic>);
-      _llenarCampos(v);
-    } catch (_) {
-      // Si falla, dejar campos vacíos
+      final vacante = await context.read<CompanyProvider>()
+          .getVacante(widget.vacanteId);
+      if (vacante != null) _rellenarCampos(vacante);
+    } catch (e) {
+      debugPrint('[EditVacancy] Error cargando vacante: $e');
     }
-    setState(() => _cargandoData = false);
   }
 
-  void _llenarCampos(Map<String, dynamic> v) {
-    _tituloCtrl.text     = v['titulo'] as String? ?? '';
-    _descCtrl.text       = v['descripcion'] as String? ?? '';
-    _requisitosCtrl.text = v['requisitos'] as String? ?? '';
-    _salarioMinCtrl.text =
-        v['sueldo_minimo'] != null ? v['sueldo_minimo'].toString() : '';
-    _salarioMaxCtrl.text =
-        v['sueldo_maximo'] != null ? v['sueldo_maximo'].toString() : '';
-    _ubicacionCtrl.text  = v['ubicacion'] as String? ?? '';
-    _modalidad    = v['modalidad'] as String?;
-    _tipoContrato = v['tipo_contrato'] as String?;
-    _estado       = v['estado'] as String? ?? 'activa';
+  void _rellenarCampos(Map<String, dynamic> v) {
+    setState(() {
+      _tituloCtrl.text      = v['titulo']      as String? ?? '';
+      _descripcionCtrl.text = v['descripcion'] as String? ?? '';
+      _requisitosCtrl.text  = v['requisitos']  as String? ?? '';
+      _ubicacionCtrl.text   = v['ubicacion']   as String? ?? '';
+
+      final minS = v['sueldo_minimo'];
+      final maxS = v['sueldo_maximo'];
+      _sueldoMinCtrl.text = minS != null ? minS.toString() : '';
+      _sueldoMaxCtrl.text = maxS != null ? maxS.toString() : '';
+
+      _modalidad     = v['modalidad']     as String? ?? 'presencial';
+      _moneda        = v['moneda']        as String? ?? 'MXN';
+      _estado        = v['estado']        as String? ?? 'activo';
+      _tipoContrato  = v['tipo_contrato'] as String?;
+
+      // Validar que los valores estén en las listas
+      if (!_modalidades.contains(_modalidad)) _modalidad = 'presencial';
+      if (!_monedas.contains(_moneda)) _moneda = 'MXN';
+      if (!_estados.contains(_estado)) _estado = 'activo';
+      if (_tipoContrato != null && !_contratos.contains(_tipoContrato))
+        _tipoContrato = null;
+
+      _inicializado = true;
+    });
   }
 
-  // ── Guardar ───────────────────────────────────────────────────────────────
+  // ── Validaciones sueldo cruzadas ──────────────────────────────────────────
+  String? _validateMin(String? v) {
+    if (v == null || v.trim().isEmpty) return null;
+    final val = double.tryParse(v.replaceAll(',', ''));
+    if (val == null || val < 0) return 'Ingresa un monto válido';
+    final maxV = double.tryParse(_sueldoMaxCtrl.text.replaceAll(',', ''));
+    if (maxV != null && val > maxV)
+      return 'El mínimo no puede ser mayor al máximo';
+    return null;
+  }
+
+  String? _validateMax(String? v) {
+    if (v == null || v.trim().isEmpty) return null;
+    final val = double.tryParse(v.replaceAll(',', ''));
+    if (val == null || val < 0) return 'Ingresa un monto válido';
+    final minV = double.tryParse(_sueldoMinCtrl.text.replaceAll(',', ''));
+    if (minV != null && val < minV)
+      return 'El máximo no puede ser menor al mínimo';
+    return null;
+  }
+
+  // ── Guardar cambios ───────────────────────────────────────────────────────
   Future<void> _guardar() async {
     if (!_formKey.currentState!.validate()) return;
-    final empresaId = context.read<AuthProvider>().usuario?.id;
-    if (empresaId == null || widget.vacanteId == null) return;
 
-    setState(() => _guardando = true);
-    try {
-      await ApiService.instance.put(
-        '/vacante/${widget.vacanteId}',
-        {
-          'titulo':      _tituloCtrl.text.trim(),
-          'descripcion': _descCtrl.text.trim(),
-          if (_requisitosCtrl.text.trim().isNotEmpty)
-            'requisitos': _requisitosCtrl.text.trim(),
-          if (_salarioMinCtrl.text.trim().isNotEmpty)
-            'sueldo_minimo': double.tryParse(_salarioMinCtrl.text.trim()),
-          if (_salarioMaxCtrl.text.trim().isNotEmpty)
-            'sueldo_maximo': double.tryParse(_salarioMaxCtrl.text.trim()),
-          if (_ubicacionCtrl.text.trim().isNotEmpty)
-            'ubicacion': _ubicacionCtrl.text.trim(),
-          if (_modalidad != null)    'modalidad': _modalidad,
-          if (_tipoContrato != null) 'tipo_contrato': _tipoContrato,
-          'estado': _estado,
-        },
-        auth: true,
-      );
-      if (!mounted) return;
-      await context.read<CompanyProvider>().cargarDashboard(empresaId);
-      _snack('Vacante actualizada', AppColors.accentGreen);
+    final minV = double.tryParse(_sueldoMinCtrl.text.replaceAll(',', ''));
+    final maxV = double.tryParse(_sueldoMaxCtrl.text.replaceAll(',', ''));
+    if (minV != null && maxV != null && minV > maxV) {
+      _snack('El sueldo mínimo no puede ser mayor al máximo', isError: true);
+      return;
+    }
+
+    // VacanteUpdate — todos los campos son opcionales (nullable en el schema)
+    // Mandamos TODOS los que tienen valor para no perder datos
+    final body = <String, dynamic>{
+      'titulo':      _tituloCtrl.text.trim(),
+      'descripcion': _descripcionCtrl.text.trim(),
+      'modalidad':   _modalidad,
+      'estado':      _estado,
+    };
+
+    if (_requisitosCtrl.text.trim().isNotEmpty)
+      body['requisitos']  = _requisitosCtrl.text.trim();
+    if (_ubicacionCtrl.text.trim().isNotEmpty)
+      body['ubicacion']   = _ubicacionCtrl.text.trim();
+    if (minV != null) body['sueldo_minimo'] = minV;
+    if (maxV != null) body['sueldo_maximo'] = maxV;
+    if (minV != null || maxV != null) body['moneda'] = _moneda;
+    if (_tipoContrato != null) body['tipo_contrato'] = _tipoContrato;
+
+    debugPrint('[EditVacancy] PUT /vacante/${widget.vacanteId} body: $body');
+
+    final ok = await context.read<CompanyProvider>()
+        .actualizarVacante(widget.vacanteId, body);
+
+    if (!mounted) return;
+    if (ok) {
+      _snack('Vacante actualizada correctamente');
       context.pop();
-    } catch (e) {
-      if (mounted) _snack(e.toString(), AppColors.error);
-    } finally {
-      if (mounted) setState(() => _guardando = false);
     }
   }
 
-  // ── Eliminar ──────────────────────────────────────────────────────────────
-  Future<void> _eliminar() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Eliminar vacante'),
-        content: const Text('Esta acción no se puede deshacer. ¿Continuar?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('Eliminar'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
+  void _snack(String msg, {bool isError = false}) =>
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: isError ? AppColors.error : AppColors.accentGreen,
+      behavior: SnackBarBehavior.floating,
+      duration: Duration(seconds: isError ? 4 : 2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
 
-    setState(() => _guardando = true);
-    try {
-      await ApiService.instance.delete('/vacante/${widget.vacanteId}');
-      if (!mounted) return;
-      final id = context.read<AuthProvider>().usuario?.id;
-      if (id != null) await context.read<CompanyProvider>().cargarDashboard(id);
-      _snack('Vacante eliminada', AppColors.accentGreen);
-      context.pop();
-    } catch (e) {
-      if (mounted) _snack(e.toString(), AppColors.error);
-    } finally {
-      if (mounted) setState(() => _guardando = false);
-    }
-  }
-
-  void _snack(String msg, Color color) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(msg),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ));
-
-  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    if (_cargandoData) {
-      return const Scaffold(
-          body: Center(child: CircularProgressIndicator()));
-    }
+    final card = Theme.of(context).cardColor;
 
-    final cardColor = Theme.of(context).cardColor;
+    if (!_inicializado) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Editar vacante'),
+            leading: IconButton(icon: const Icon(Icons.arrow_back),
+                onPressed: () => context.pop())),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Editar vacante'),
+        leading: IconButton(icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.pop()),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.delete_outline, color: AppColors.error),
-            onPressed: _guardando ? null : _eliminar,
-            tooltip: 'Eliminar vacante',
-          ),
-          TextButton(
-            onPressed: _guardando ? null : _guardar,
-            child: _guardando
-                ? const SizedBox(width: 20, height: 20,
+          Consumer<CompanyProvider>(builder: (_, p, __) => TextButton(
+            onPressed: p.cargando ? null : _guardar,
+            child: p.cargando
+                ? const SizedBox(width: 18, height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Guardar'),
-          ),
+                : const Text('Guardar',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+          )),
         ],
       ),
       body: Form(
         key: _formKey,
-        child: ListView(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          children: [
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-            _sec('Información básica'),
-            const SizedBox(height: 16),
-            _field(ctrl: _tituloCtrl, label: 'Título del puesto *',
-                icon: Icons.work_outline, cardColor: cardColor,
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Requerido' : null),
-            const SizedBox(height: 16),
-            _field(ctrl: _descCtrl, label: 'Descripción *',
-                icon: Icons.description_outlined, cardColor: cardColor,
-                maxLines: 4,
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Requerido' : null),
-            const SizedBox(height: 16),
-            _field(ctrl: _requisitosCtrl, label: 'Requisitos',
-                icon: Icons.checklist_outlined, cardColor: cardColor,
-                maxLines: 3,
-                hint: 'Ej: 2 años de experiencia, inglés intermedio...'),
+            // Error
+            Consumer<CompanyProvider>(builder: (_, p, __) {
+              if (p.error == null) return const SizedBox.shrink();
+              return Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: AppColors.error.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.error.withOpacity(0.3))),
+                child: Row(children: [
+                  const Icon(Icons.error_outline, color: AppColors.error, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(p.error!,
+                      style: const TextStyle(color: AppColors.error))),
+                  IconButton(icon: const Icon(Icons.close, size: 16),
+                      onPressed: () => p.limpiarError()),
+                ]),
+              );
+            }),
+
+            // ── Información básica ─────────────────────────────────────
+            _sectionHeader('Información básica', Icons.work_outline),
+            const SizedBox(height: 12),
+
+            TextFormField(
+              controller: _tituloCtrl,
+              style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
+              decoration: _deco('Título del puesto *', Icons.title, card),
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? 'El título es obligatorio' : null,
+            ),
+            const SizedBox(height: 14),
+
+            TextFormField(
+              controller: _descripcionCtrl, maxLines: 5, maxLength: 1000,
+              style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
+              decoration: _deco('Descripción *', Icons.description_outlined, card)
+                  .copyWith(alignLabelWithHint: true),
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'La descripción es obligatoria';
+                if (v.trim().length < 20) return 'Mínimo 20 caracteres';
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
+
+            // Modalidad
+            Text('Modalidad *', style: AppTextStyles.bodyMedium.copyWith(
+                fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+            const SizedBox(height: 8),
+            Row(children: _modalidades.asMap().entries.map((e) {
+              final m = e.value; final sel = _modalidad == m;
+              return Expanded(child: Padding(
+                padding: EdgeInsets.only(right: e.key < _modalidades.length-1 ? 8 : 0),
+                child: GestureDetector(
+                  onTap: () => setState(() => _modalidad = m),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: sel ? AppColors.primaryPurple : card,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: sel ? AppColors.primaryPurple : AppColors.borderLight,
+                          width: sel ? 2 : 1)),
+                    child: Column(children: [
+                      Icon(_modalIcon(m), size: 20,
+                          color: sel ? Colors.white : AppColors.textSecondary),
+                      const SizedBox(height: 4),
+                      Text(_lModal(m), style: AppTextStyles.bodySmall.copyWith(
+                          color: sel ? Colors.white : AppColors.textSecondary,
+                          fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
+                ),
+              ));
+            }).toList()),
+            const SizedBox(height: 14),
+
+            // Tipo contrato
+            DropdownButtonFormField<String>(
+              value: _tipoContrato,
+              decoration: _deco('Tipo de contrato', Icons.badge_outlined, card),
+              hint: const Text('Sin especificar'),
+              dropdownColor: card,
+              items: [
+                const DropdownMenuItem(value: null, child: Text('Sin especificar')),
+                ..._contratos.map((c) => DropdownMenuItem(value: c, child: Text(c))),
+              ],
+              onChanged: (v) => setState(() => _tipoContrato = v),
+            ),
+            const SizedBox(height: 14),
+
+            TextFormField(
+              controller: _ubicacionCtrl,
+              style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
+              decoration: _deco('Ubicación', Icons.location_on_outlined, card)
+                  .copyWith(hintText: 'Ciudad, Estado'),
+            ),
+
+            // ── Sueldo ─────────────────────────────────────────────────
+            const SizedBox(height: 24),
+            _sectionHeader('Rango salarial', Icons.attach_money),
+            const SizedBox(height: 12),
+
+            // Moneda
+            Row(children: [
+              const Icon(Icons.currency_exchange, size: 15,
+                  color: AppColors.textSecondary),
+              const SizedBox(width: 6),
+              Text('Moneda:', style: AppTextStyles.bodySmall.copyWith(
+                  color: AppColors.textSecondary)),
+              const SizedBox(width: 10),
+              ..._monedas.map((m) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: Text(m), selected: _moneda == m,
+                  onSelected: (_) => setState(() => _moneda = m),
+                  selectedColor: AppColors.primaryPurple,
+                  labelStyle: TextStyle(
+                      color: _moneda == m ? Colors.white : null,
+                      fontWeight: FontWeight.w600),
+                ),
+              )),
+            ]),
+            const SizedBox(height: 12),
+
+            Row(children: [
+              Expanded(child: TextFormField(
+                controller: _sueldoMinCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+                style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
+                decoration: _deco('Sueldo mínimo', Icons.south, card)
+                    .copyWith(prefixText: '\$  '),
+                validator: _validateMin,
+                onChanged: (_) => _formKey.currentState?.validate(),
+              )),
+              Padding(padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Text('–', style: AppTextStyles.h4.copyWith(
+                      color: AppColors.textSecondary))),
+              Expanded(child: TextFormField(
+                controller: _sueldoMaxCtrl,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
+                style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
+                decoration: _deco('Sueldo máximo', Icons.north, card)
+                    .copyWith(prefixText: '\$  '),
+                validator: _validateMax,
+                onChanged: (_) => _formKey.currentState?.validate(),
+              )),
+            ]),
+
+            if (_sueldoMinCtrl.text.isNotEmpty || _sueldoMaxCtrl.text.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(color: AppColors.accentGreen.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10)),
+                child: Text(_sueldoPreview(), style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.accentGreen, fontWeight: FontWeight.w600)),
+              ),
+            ],
+
+            // ── Requisitos ─────────────────────────────────────────────
+            const SizedBox(height: 24),
+            _sectionHeader('Requisitos', Icons.checklist_outlined),
+            const SizedBox(height: 12),
+
+            TextFormField(
+              controller: _requisitosCtrl, maxLines: 4, maxLength: 500,
+              style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
+              decoration: _deco('Requisitos y habilidades', Icons.checklist, card)
+                  .copyWith(alignLabelWithHint: true),
+            ),
+
+            // ── Estado ─────────────────────────────────────────────────
+            const SizedBox(height: 24),
+            _sectionHeader('Estado de la vacante', Icons.toggle_on_outlined),
+            const SizedBox(height: 12),
+
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(color: card,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.borderLight)),
+              child: Row(children: _estados.map((e) {
+                final sel = _estado == e;
+                return Expanded(child: GestureDetector(
+                  onTap: () => setState(() => _estado = e),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                        color: sel ? _estadoColor(e) : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Center(child: Text(_lEstado(e),
+                        style: AppTextStyles.bodySmall.copyWith(
+                            color: sel ? Colors.white : AppColors.textSecondary,
+                            fontWeight: FontWeight.w600))),
+                  ),
+                ));
+              }).toList()),
+            ),
+            const SizedBox(height: 8),
+            Text(_estadoDesc(_estado), style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textTertiary)),
             const SizedBox(height: 32),
 
-            _sec('Condiciones'),
-            const SizedBox(height: 16),
-            Row(children: [
-              Expanded(child: _field(
-                ctrl: _salarioMinCtrl, label: 'Sueldo mínimo',
-                icon: Icons.attach_money, cardColor: cardColor,
-                hint: '15000', keyboard: TextInputType.number)),
-              const SizedBox(width: 12),
-              Expanded(child: _field(
-                ctrl: _salarioMaxCtrl, label: 'Sueldo máximo',
-                icon: Icons.attach_money, cardColor: cardColor,
-                hint: '20000', keyboard: TextInputType.number)),
-            ]),
-            const SizedBox(height: 16),
-            _field(ctrl: _ubicacionCtrl, label: 'Ubicación',
-                icon: Icons.location_on_outlined, cardColor: cardColor,
-                hint: 'Ciudad, Estado'),
-            const SizedBox(height: 24),
-
-            _lbl('Modalidad'), const SizedBox(height: 8),
-            Wrap(spacing: 8, children: _modalidades.map((m) {
-              final sel = _modalidad == m;
-              return ChoiceChip(
-                label: Text(_lModal(m)), selected: sel,
-                onSelected: (_) =>
-                    setState(() => _modalidad = sel ? null : m),
-                selectedColor: AppColors.primaryPurple,
-                labelStyle: TextStyle(
-                    color: sel ? Colors.white : null,
-                    fontWeight: FontWeight.w600));
-            }).toList()),
-            const SizedBox(height: 20),
-
-            _lbl('Tipo de contrato'), const SizedBox(height: 8),
-            Wrap(spacing: 8, runSpacing: 8, children: _tiposContrato.map((t) {
-              final sel = _tipoContrato == t;
-              return ChoiceChip(
-                label: Text(_lTipo(t)), selected: sel,
-                onSelected: (_) =>
-                    setState(() => _tipoContrato = sel ? null : t),
-                selectedColor: AppColors.primaryPurple,
-                labelStyle: TextStyle(
-                    color: sel ? Colors.white : null,
-                    fontWeight: FontWeight.w600));
-            }).toList()),
-            const SizedBox(height: 20),
-
-            _lbl('Estado de la vacante'), const SizedBox(height: 8),
-            Wrap(spacing: 8, children: _estados.map((e) {
-              final sel   = _estado == e;
-              final color = _colorEstado(e);
-              return ChoiceChip(
-                label: Text(_lEstado(e)), selected: sel,
-                onSelected: (_) => setState(() => _estado = e),
-                selectedColor: color,
-                labelStyle: TextStyle(
-                    color: sel ? Colors.white : null,
-                    fontWeight: FontWeight.w600));
-            }).toList()),
-            const SizedBox(height: 40),
-
-            SizedBox(
+            Consumer<CompanyProvider>(builder: (_, p, __) => SizedBox(
               width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _guardando ? null : _guardar,
-                child: _guardando
-                    ? const SizedBox(height: 20, width: 20,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : const Text('Guardar cambios'),
+              child: ElevatedButton.icon(
+                onPressed: p.cargando ? null : _guardar,
+                icon: p.cargando
+                    ? const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Icon(Icons.save_outlined),
+                label: Text(p.cargando ? 'Guardando...' : 'Guardar cambios'),
+                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
               ),
-            ),
-            const SizedBox(height: 16),
-          ],
+            )),
+            const SizedBox(height: 24),
+          ]),
         ),
       ),
     );
   }
 
-  Widget _sec(String t) => Text(t, style: AppTextStyles.h4);
+  String _sueldoPreview() {
+    final min = _sueldoMinCtrl.text.trim();
+    final max = _sueldoMaxCtrl.text.trim();
+    if (min.isNotEmpty && max.isNotEmpty) return 'Vista: \$$min – \$$max $_moneda/mes';
+    if (min.isNotEmpty) return 'Vista: Desde \$$min $_moneda/mes';
+    if (max.isNotEmpty) return 'Vista: Hasta \$$max $_moneda/mes';
+    return '';
+  }
 
-  Widget _lbl(String t) => Text(t,
-      style: AppTextStyles.bodyMedium.copyWith(
-          color: AppColors.textSecondary));
+  Widget _sectionHeader(String title, IconData icon) => Row(children: [
+    Icon(icon, size: 18, color: AppColors.primaryPurple),
+    const SizedBox(width: 8),
+    Text(title, style: AppTextStyles.h4),
+  ]);
 
-  Widget _field({
-    required TextEditingController ctrl,
-    required String label,
-    required IconData icon,
-    required Color cardColor,
-    String? hint,
-    int maxLines = 1,
-    String? Function(String?)? validator,
-    TextInputType? keyboard,
-  }) =>
-      TextFormField(
-        controller: ctrl,
-        maxLines: maxLines,
-        validator: validator,
-        keyboardType: keyboard,
-        decoration: InputDecoration(
-          labelText: label,
-          hintText: hint,
-          prefixIcon: Icon(icon, color: AppColors.primaryPurple),
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12)),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.borderLight),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(
-                color: AppColors.primaryPurple, width: 2),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.error),
-          ),
-          filled: true,
-          fillColor: cardColor,
-        ),
-      );
+  InputDecoration _deco(String label, IconData icon, Color fill) =>
+    InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, color: AppColors.primaryPurple),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.borderLight)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.primaryPurple, width: 2)),
+      errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.error, width: 1.5)),
+      focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.error, width: 2)),
+      filled: true, fillColor: fill,
+    );
 
-  String _lModal(String m) {
+  IconData _modalIcon(String m) {
     switch (m) {
-      case 'remoto':     return 'Remoto';
-      case 'presencial': return 'Presencial';
-      case 'hibrido':    return 'Híbrido';
-      default:           return m;
+      case 'remoto': return Icons.home_work_outlined;
+      case 'presencial': return Icons.business_outlined;
+      case 'hibrido': return Icons.sync_alt_outlined;
+      default: return Icons.work_outline;
     }
   }
 
-  String _lTipo(String t) {
-    switch (t) {
-      case 'tiempo_completo': return 'Tiempo completo';
-      case 'medio_tiempo':    return 'Medio tiempo';
-      case 'practicas':       return 'Prácticas';
-      case 'freelance':       return 'Freelance';
-      default:                return t;
+  String _lModal(String m) {
+    switch (m) {
+      case 'remoto': return 'Remoto'; case 'presencial': return 'Presencial';
+      case 'hibrido': return 'Híbrido'; default: return m;
+    }
+  }
+
+  Color _estadoColor(String e) {
+    switch (e) {
+      case 'activo':   return AppColors.accentGreen;
+      case 'inactivo': return AppColors.error;
+      case 'pausado':  return Colors.orange;
+      default:         return AppColors.primaryPurple;
     }
   }
 
   String _lEstado(String e) {
     switch (e) {
-      case 'activa':  return 'Activa';
-      case 'pausada': return 'Pausada';
-      case 'cerrada': return 'Cerrada';
-      default:        return e;
+      case 'activo': return 'Activa'; case 'inactivo': return 'Inactiva';
+      case 'pausado': return 'Pausada'; default: return e;
     }
   }
 
-  Color _colorEstado(String e) {
+  String _estadoDesc(String e) {
     switch (e) {
-      case 'activa':  return AppColors.accentGreen;
-      case 'pausada': return Colors.orange;
-      case 'cerrada': return AppColors.error;
-      default:        return AppColors.textSecondary;
+      case 'activo':   return 'Visible para todos los estudiantes';
+      case 'inactivo': return 'No visible — cerrada';
+      case 'pausado':  return 'Visible pero sin nuevas postulaciones';
+      default:         return '';
     }
   }
 }

@@ -8,15 +8,25 @@ import '../presentation/screens/auth/welcome_screen.dart';
 import '../presentation/screens/auth/login_screen.dart';
 import '../presentation/screens/auth/register_student_screen.dart';
 import '../presentation/screens/auth/register_company_screen.dart';
-import '../presentation/screens/student/student_shell_screen.dart';
+
+// Student
+import '../presentation/screens/student/home/student_home_screen.dart';
 import '../presentation/screens/student/profile/student_edit_profile_screen.dart';
-import '../presentation/screens/student/ai_feedback/ai_feedback_screen.dart';
-import '../presentation/screens/company/company_shell_screen.dart';
+import '../presentation/screens/common/premium_screen.dart';
+import '../presentation/screens/common/settings_screen.dart';
+
+// Student shell (IndexedStack)
+import '../presentation/screens/student/student_shell_screen.dart';
+
+// Company shell (IndexedStack) — ES LA PANTALLA RAÍZ DE EMPRESA
+import '../presentation/screens/company/home/company_home_screen.dart';
+
+// Company pantallas push (fuera del shell)
 import '../presentation/screens/company/vacancies/create_vacancy_screen.dart';
 import '../presentation/screens/company/vacancies/edit_vacancy_screen.dart';
 import '../presentation/screens/company/profile/company_edit_profile_screen.dart';
-import '../presentation/screens/common/premium_screen.dart';
-import '../presentation/screens/common/settings_screen.dart';
+
+// Settings y premium separados por rol
 import '../presentation/screens/student/settings/student_settings_screen.dart';
 import '../presentation/screens/student/premium/student_premium_screen.dart';
 import '../presentation/screens/company/settings/company_settings_screen.dart';
@@ -30,91 +40,82 @@ class AppRouter {
     debugLogDiagnostics: true,
     routes: [
 
-      GoRoute(path: AppRoutes.splash, name: 'splash',
+      // ── Splash ────────────────────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.splash,
         pageBuilder: (_, state) => CustomTransitionPage(
           key: state.pageKey, child: const SplashScreen(),
-          transitionsBuilder: (_, anim, __, child) =>
-              FadeTransition(opacity: anim, child: child))),
+          transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c)),
+      ),
 
-      GoRoute(path: AppRoutes.welcome, name: 'welcome',
+      // ── Auth ──────────────────────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.welcome,
         pageBuilder: (_, state) => CustomTransitionPage(
           key: state.pageKey, child: const WelcomeScreen(),
-          transitionsBuilder: (_, anim, __, child) =>
-              FadeTransition(opacity: anim, child: child))),
+          transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c)),
+      ),
+      GoRoute(path: AppRoutes.login,
+          builder: (_, __) => const LoginScreen()),
+      GoRoute(path: AppRoutes.registerStudent,
+          builder: (_, __) => const RegisterStudentScreen()),
+      GoRoute(path: AppRoutes.registerCompany,
+          builder: (_, __) => const RegisterCompanyScreen()),
 
-      GoRoute(path: AppRoutes.login, name: 'login',
-        pageBuilder: (_, state) => CustomTransitionPage(
-          key: state.pageKey, child: const LoginScreen(),
-          transitionsBuilder: (_, anim, __, child) => SlideTransition(
-            position: Tween(begin: const Offset(1.0, 0.0), end: Offset.zero)
-                .chain(CurveTween(curve: Curves.easeInOut)).animate(anim),
-            child: child))),
-
-      GoRoute(path: AppRoutes.studentSettings, name: 'student-settings',
-          builder: (_, __) => const StudentSettingsScreen()),
-      GoRoute(path: AppRoutes.studentPremium, name: 'student-premium',
-          builder: (_, __) => const StudentPremiumScreen()),
-      GoRoute(path: AppRoutes.companyEditProfile, name: 'company-edit-profile',
-          builder: (_, __) => const CompanyEditProfileScreen()),
-      GoRoute(path: AppRoutes.companySettings, name: 'company-settings',
-          builder: (_, __) => const CompanySettingsScreen()),
-      GoRoute(path: AppRoutes.companyPremium, name: 'company-premium',
-          builder: (_, __) => const CompanyPremiumScreen()),
-
-
-
-      GoRoute(path: AppRoutes.registerStudent, name: 'register-student',
-        pageBuilder: (_, state) => CustomTransitionPage(
-          key: state.pageKey, child: const RegisterStudentScreen(),
-          transitionsBuilder: (_, anim, __, child) => SlideTransition(
-            position: Tween(begin: const Offset(1.0, 0.0), end: Offset.zero)
-                .chain(CurveTween(curve: Curves.easeInOut)).animate(anim),
-            child: child))),
-
-      GoRoute(path: AppRoutes.registerCompany, name: 'register-company',
-        pageBuilder: (_, state) => CustomTransitionPage(
-          key: state.pageKey, child: const RegisterCompanyScreen(),
-          transitionsBuilder: (_, anim, __, child) => SlideTransition(
-            position: Tween(begin: const Offset(1.0, 0.0), end: Offset.zero)
-                .chain(CurveTween(curve: Curves.easeInOut)).animate(anim),
-            child: child))),
-
-      // ── Student Shell — nav bar persistente ────────────────────────────────
-      GoRoute(path: AppRoutes.studentHome,         name: 'student-home',         builder: (_, __) => const StudentShellScreen()),
-      GoRoute(path: AppRoutes.studentProfile,      name: 'student-profile',      builder: (_, __) => const StudentShellScreen()),
-      GoRoute(path: AppRoutes.studentApplications, name: 'student-applications', builder: (_, __) => const StudentShellScreen()),
-      GoRoute(path: AppRoutes.studentActivity,     name: 'student-activity',     builder: (_, __) => const StudentShellScreen()),
-
-      // Sub-pantallas estudiante (sin nav bar)
-      GoRoute(path: AppRoutes.editProfile, name: 'edit-profile',
+      // ── Student — Shell (IndexedStack con 4 tabs) ─────────────────────────
+      // studentHome apunta al shell que contiene home, matches, actividad, perfil
+      GoRoute(
+        path: AppRoutes.studentHome,
+        builder: (_, __) => const StudentShellScreen(),
+      ),
+      // Pantallas fuera del shell del estudiante (push sobre el shell)
+      GoRoute(path: AppRoutes.editProfile,
           builder: (_, __) => const StudentEditProfileScreen()),
-      GoRoute(path: AppRoutes.aiFeedback, name: 'ai-feedback',
-        builder: (_, state) {
-          final extra = state.extra as Map<String, dynamic>?;
-          return AIFeedbackScreen(
-            applicationId: extra?['applicationId'],
-            companyName:   extra?['companyName'],
-            position:      extra?['position'],
-          );
-        }),
+      GoRoute(path: AppRoutes.studentSettings,
+          builder: (_, __) => const StudentSettingsScreen()),
+      GoRoute(path: AppRoutes.studentPremium,
+          builder: (_, __) => const StudentPremiumScreen()),
 
-      // ── Company Shell ──────────────────────────────────────────────────────
-      GoRoute(path: AppRoutes.companyHome,         name: 'company-home',         builder: (_, __) => const CompanyShellScreen()),
-      GoRoute(path: AppRoutes.companyVacancies,    name: 'company-vacancies',    builder: (_, __) => const CompanyShellScreen()),
-      GoRoute(path: AppRoutes.companyCandidates,   name: 'company-candidates',   builder: (_, __) => const CompanyShellScreen()),
-      GoRoute(path: AppRoutes.companyProfile,      name: 'company-profile',      builder: (_, __) => const CompanyShellScreen()),
-
-      // Sub-pantallas empresa (sin nav bar)
-      GoRoute(path: AppRoutes.companyCreateVacancy, name: 'company-create-vacancy',
+      // ── Company — Shell (IndexedStack con 4 tabs) ─────────────────────────
+      // companyHome apunta al shell que contiene inicio, vacantes, candidatos, perfil
+      GoRoute(
+        path: AppRoutes.companyHome,
+        builder: (_, __) => const CompanyHomeScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.companyVacancies,
+        builder: (_, __) => const CompanyHomeScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.companyCandidates,
+        builder: (_, __) => const CompanyHomeScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.companyProfile,
+        builder: (_, __) => const CompanyHomeScreen(),
+      ),
+      // Pantallas fuera del shell de empresa (push sobre el shell)
+      GoRoute(path: AppRoutes.companyCreateVacancy,
           builder: (_, __) => const CreateVacancyScreen()),
-      GoRoute(path: '/company/vacancies/edit/:id',  name: 'company-edit-vacancy',
+      GoRoute(
+        path: '/company/vacancies/edit/:id',
         builder: (_, state) {
           final id = int.tryParse(state.pathParameters['id'] ?? '');
-          return EditVacancyScreen(vacanteId: id);
-        }),
+          return EditVacancyScreen(vacanteId: id ?? 0);
+        },
+      ),
+      GoRoute(path: AppRoutes.companyEditProfile,
+          builder: (_, __) => const CompanyEditProfileScreen()),
+      GoRoute(path: AppRoutes.companySettings,
+          builder: (_, __) => const CompanySettingsScreen()),
+      GoRoute(path: AppRoutes.companyPremium,
+          builder: (_, __) => const CompanyPremiumScreen()),
 
-      // ── Common ─────────────────────────────────────────────────────────────
-      GoRoute(path: AppRoutes.settings, name: 'settings', builder: (_, __) => const SettingsScreen()),
+      // ── Común ─────────────────────────────────────────────────────────────
+      GoRoute(path: AppRoutes.settings,
+          builder: (_, __) => const SettingsScreen()),
+      // GoRoute(path: AppRoutes.premium,
+      //     builder: (_, __) => const PremiumScreen()),
     ],
 
     errorBuilder: (context, state) => Scaffold(
@@ -123,11 +124,11 @@ class AppRouter {
         children: [
           const Icon(Icons.error_outline, size: 64, color: Colors.red),
           const SizedBox(height: 16),
-          Text('Error: ${state.error}'),
+          Text('Ruta no encontrada: ${state.error}'),
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: () => context.go(AppRoutes.welcome),
-            child: const Text('Volver al inicio'),
+            child: const Text('Ir al inicio'),
           ),
         ],
       )),
