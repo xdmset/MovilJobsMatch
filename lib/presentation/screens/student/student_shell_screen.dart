@@ -11,7 +11,6 @@ import 'profile/student_profile_screen.dart';
 
 class StudentShellScreen extends StatefulWidget {
   const StudentShellScreen({super.key});
-
   @override
   State<StudentShellScreen> createState() => _StudentShellScreenState();
 }
@@ -42,7 +41,7 @@ class _StudentShellScreenState extends State<StudentShellScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _recargarTodo();
+    if (state == AppLifecycleState.resumed) _recargar();
   }
 
   Future<void> _init() async {
@@ -50,21 +49,23 @@ class _StudentShellScreenState extends State<StudentShellScreen>
     final p      = context.read<StudentProvider>();
     if (userId == null) return;
 
-    // ORDEN IMPORTANTE:
-    // 1. Cargar historial primero (obtiene IDs ya vistas)
-    // 2. Luego cargar vacantes (usa esos IDs para sincronizar índice)
+    // ORDEN CRÍTICO:
+    // 1. Historial (llena _vacanteIdsVistas)
+    // 2. Vacantes (usa feed del servidor, ya filtra las vistas)
+    // 3. Matches reales del servidor
     await p.cargarHistorial(userId);
-    await p.cargarVacantes();
+    await p.cargarVacantes(estudianteId: userId);
+    await p.cargarMatches(userId);
   }
 
-  Future<void> _recargarTodo() async {
+  Future<void> _recargar() async {
     final userId = context.read<AuthProvider>().usuario?.id;
     final p      = context.read<StudentProvider>();
     if (userId == null) return;
     await p.cargarHistorial(userId);
-    // Solo recargar vacantes si se acabaron
+    await p.cargarMatches(userId);
     if (p.currentVacancy == null && !p.hasReachedLimit) {
-      await p.cargarVacantes(resetIndex: true);
+      await p.cargarVacantes(estudianteId: userId, resetIndex: true);
     }
   }
 
@@ -76,11 +77,13 @@ class _StudentShellScreenState extends State<StudentShellScreen>
         currentIndex: _currentIndex,
         onTap: (i) {
           setState(() => _currentIndex = i);
-          // Al entrar a Actividad recargar historial
-          if (i == 2) {
+          // Refrescar historial y matches al entrar a la tab de Postulaciones
+          if (i == 1 || i == 2) {
             final userId = context.read<AuthProvider>().usuario?.id;
             if (userId != null) {
-              context.read<StudentProvider>().cargarHistorial(userId);
+              final p = context.read<StudentProvider>();
+              p.cargarHistorial(userId);
+              if (i == 1) p.cargarMatches(userId);
             }
           }
         },
@@ -93,7 +96,7 @@ class _StudentShellScreenState extends State<StudentShellScreen>
           BottomNavigationBarItem(
             icon: Icon(Icons.favorite_outline),
             activeIcon: Icon(Icons.favorite),
-            label: 'Matches',
+            label: 'Postulaciones',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.history_outlined),
