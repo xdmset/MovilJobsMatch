@@ -11,7 +11,6 @@ enum AuthStatus { inicial, cargando, autenticado, noAutenticado }
 class AuthProvider extends ChangeNotifier {
   final AuthRepository _repo = AuthRepository();
 
-  // ThemeProvider inyectado para resetear el tema al hacer logout
   ThemeProvider? _themeProvider;
   void setThemeProvider(ThemeProvider tp) => _themeProvider = tp;
 
@@ -39,6 +38,21 @@ class AuthProvider extends ChangeNotifier {
           ? AuthStatus.autenticado : AuthStatus.noAutenticado;
     } catch (_) { _status = AuthStatus.noAutenticado; }
     notifyListeners();
+  }
+
+  // ── Refresca solo el flag esPremium del usuario sin cambiar el status ─────
+  // Llamar después de sincronizar con PayPal o cancelar suscripción.
+  Future<void> refrescarUsuario() async {
+    try {
+      final user = await _repo.restaurarSesion();
+      if (user != null) {
+        _usuario = user;
+        notifyListeners();
+        debugPrint('[AuthProvider] usuario refrescado — esPremium: ${user.esPremium}');
+      }
+    } catch (e) {
+      debugPrint('[AuthProvider] refrescarUsuario error: $e');
+    }
   }
 
   Future<bool> login({required String email, required String password}) async {
@@ -97,12 +111,10 @@ class AuthProvider extends ChangeNotifier {
     } catch (_) { _setError('Error al crear la cuenta.'); return false; }
   }
 
-  // ── Logout — también resetea el tema a claro ───────────────────────────
   Future<void> logout() async {
     await _repo.logout();
     _usuario = null; _error = null;
     _status  = AuthStatus.noAutenticado;
-    // Resetear tema a claro por defecto
     await _themeProvider?.resetToLight();
     notifyListeners();
   }

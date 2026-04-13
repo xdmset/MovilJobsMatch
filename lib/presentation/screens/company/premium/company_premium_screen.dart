@@ -1,10 +1,11 @@
 // lib/presentation/screens/company/premium/company_premium_screen.dart
-// Pantalla Premium exclusiva para empresas
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../providers/auth_provider.dart';
@@ -16,11 +17,13 @@ class CompanyPremiumScreen extends StatefulWidget {
   State<CompanyPremiumScreen> createState() => _CompanyPremiumScreenState();
 }
 
-class _CompanyPremiumScreenState extends State<CompanyPremiumScreen> {
+class _CompanyPremiumScreenState extends State<CompanyPremiumScreen>
+    with WidgetsBindingObserver {
   final _repo = PaypalRepository.instance;
 
   List<Map<String, dynamic>> _planes = [];
   Map<String, dynamic>? _planSel;
+  Map<String, dynamic>? _suscripcionActual;
   bool _cargando = true;
   bool _procesando = false;
   String? _error;
@@ -34,394 +37,453 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen> {
   @override
   void initState() {
     super.initState();
-    _cargarPlanes();
+    WidgetsBinding.instance.addObserver(this);
+    _init();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _pendingId != null) {
+      debugPrint('[PayPal] App resumed con pendingId empresa: $_pendingId');
+      _sync();
+    }
+  }
+
+  Future<void> _init() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('pending_paypal_sub_id_empresa');
+    if (saved != null) setState(() => _pendingId = saved);
+
+    await Future.wait([_cargarPlanes(), _cargarSuscripcion()]);
+
+    if (mounted && context.read<AuthProvider>().esPremium) {
+      _limpiarPendiente();
+    }
   }
 
   Future<void> _cargarPlanes() async {
-    setState(() {
-      _cargando = true;
-      _error = null;
-    });
+    setState(() { _cargando = true; _error = null; });
     try {
-      final planes = await _repo.getPlanes();
+      final todos = await _repo.getPlanes();
+      debugPrint('[PayPal] Total planes recibidos empresa: ${todos.length}');
+
+      // FIX: Filtrar planes para empresa — campo 'rol_objetivo'
+      List<Map<String, dynamic>> planesEmpresa;
+
+      final tieneRolObjetivo = todos.any((p) => p['rol_objetivo'] != null);
+
+      if (tieneRolObjetivo) {
+        planesEmpresa = todos.where((p) {
+          final rol = (p['rol_objetivo'] ?? '').toString().toLowerCase();
+          return rol.contains('empresa');
+        }).toList();
+      } else {
+        // /plans/me ya filtró por rol, usar todos
+        planesEmpresa = todos;
+      }
+
+      debugPrint('[PayPal] Planes empresa filtrados: ${planesEmpresa.length}');
+
       setState(() {
-        _planes = planes;
-        _planSel = planes.isEmpty
-            ? null
-            : planes.firstWhere(
-                (p) => _codigo(p).toLowerCase().contains('mensual'),
-                orElse: () => planes.first);
+        if (planesEmpresa.isNotEmpty) {
+          _planes = planesEmpresa;
+          // Ordenar: mensual → semestral → anual
+          _planes.sort((a, b) {
+            const orden = ['mensual', 'semestral', 'anual'];
+            return orden.indexOf(_billingCycle(a))
+                .compareTo(orden.indexOf(_billingCycle(b)));
+          });
+          _planSel = _planes.firstWhere(
+            (p) => _billingCycle(p) == 'mensual',
+            orElse: () => _planes.first,
+          );
+        } else if (todos.isNotEmpty) {
+          debugPrint('[PayPal] ⚠️ No se encontraron planes con rol_objetivo=empresa, usando todos');
+          _planes = todos;
+          _planSel = todos.first;
+        } else {
+          _error = 'No hay planes disponibles.\nContacta soporte si el problema persiste.';
+        }
         _cargando = false;
       });
     } catch (e) {
+      debugPrint('[PayPal] Error al cargar planes empresa: $e');
       setState(() {
-        _error = 'No se pudieron cargar los planes';
+        _error = 'Error al cargar planes. Verifica tu conexión.';
         _cargando = false;
       });
     }
   }
 
-  String _codigo(Map p) =>
-      (p['plan_code'] ?? p['code'] ?? p['id'] ?? '').toString();
-  String _nombre(Map p) {
-    final c = _codigo(p).toLowerCase();
-    final n = (p['name'] ?? p['nombre'] ?? '').toString();
-    if (n.isNotEmpty && !n.startsWith('{')) return n;
-    if (c.contains('mensual')) return 'Mensual';
-    if (c.contains('semestral')) return 'Semestral';
-    if (c.contains('anual')) return 'Anual';
-    return c;
+  Future<void> _cargarSuscripcion() async {
+    final userId = context.read<AuthProvider>().userId;
+    if (userId == null) return;
+    try {
+      final sub = await _repo.getSuscripcionActual(userId);
+      if (mounted) setState(() => _suscripcionActual = sub);
+    } catch (_) {}
   }
 
-  String _precio(Map p) {
-    final pr = p['price'] ?? p['precio'] ?? p['amount'];
-    final mo = p['currency'] ?? p['moneda'] ?? 'MXN';
-    final c = _codigo(p).toLowerCase();
-    final sf = c.contains('mensual')
-        ? '/mes'
-        : c.contains('semestral')
-            ? '/6 meses'
-            : c.contains('anual')
-                ? '/año'
-                : '';
-    return pr != null ? '\$$pr $mo$sf' : _nombre(p);
+  Future<void> _limpiarPendiente() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('pending_paypal_sub_id_empresa');
+    if (mounted) setState(() => _pendingId = null);
   }
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  // FIX: ya NO usa p['id'] como fallback (causaba que todos dieran 'mensual')
   String _billingCycle(Map<String, dynamic> p) {
-    final code = _codigo(p).toLowerCase();
-    if (code.contains('mensual')) return 'monthly';
-    if (code.contains('semestral')) return 'semestral';
-    if (code.contains('anual')) return 'annual';
-    return 'monthly'; // default
+    final candidates = [
+      p['periodicidad'],
+      p['codigo'],
+      p['plan_code'],
+      p['code'],
+      p['nombre'],
+    ].whereType<String>().map((s) => s.toLowerCase());
+
+    for (final val in candidates) {
+      if (val.contains('semestral')) return 'semestral';
+      if (val.contains('anual'))     return 'anual';
+      if (val.contains('mensual'))   return 'mensual';
+    }
+    return 'mensual';
   }
 
+  String _nombrePlan(Map<String, dynamic> p) {
+    switch (_billingCycle(p)) {
+      case 'mensual':   return 'Mensual';
+      case 'semestral': return 'Semestral';
+      case 'anual':     return 'Anual';
+      default:          return p['nombre']?.toString() ?? 'Plan';
+    }
+  }
+
+  String _precioFormateado(Map<String, dynamic> p) {
+    final precio = p['precio'] ?? p['price'] ?? p['amount'] ?? '0';
+    final moneda = p['moneda'] ?? p['currency'] ?? 'MXN';
+    final sufijos = {'mensual': '/mes', 'semestral': '/6 meses', 'anual': '/año'};
+    final sufijo = sufijos[_billingCycle(p)] ?? '/mes';
+    return '\$$precio $moneda$sufijo';
+  }
+
+  String? get _paypalSubId {
+    final sub = _suscripcionActual;
+    if (sub == null) return null;
+    return sub['paypal_subscription_id'] as String?
+        ?? sub['suscripcion']?['paypal_subscription_id'] as String?;
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final esPremium = context.watch<AuthProvider>().esPremium;
-    final card = Theme.of(context).cardColor;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Premium para empresas'),
+        title: const Text('JobMatch Business'),
         leading: IconButton(
-            icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.pop()),
         actions: [
           if (_pendingId != null && !esPremium)
-            TextButton(
+            TextButton.icon(
               onPressed: _procesando ? null : _sync,
-              child: const Text('Verificar pago',
-                  style: TextStyle(
-                      color: AppColors.accentGreen,
+              icon: const Icon(Icons.sync,
+                  color: AppColors.accentGreen, size: 18),
+              label: const Text('Verificar',
+                  style: TextStyle(color: AppColors.accentGreen,
                       fontWeight: FontWeight.bold)),
             ),
         ],
       ),
       body: SingleChildScrollView(
-          child: Column(children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(24, 32, 24, 40),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(colors: [
-              AppColors.accentBlue,
-              AppColors.accentBlue.withBlue(255),
-            ], begin: Alignment.topLeft, end: Alignment.bottomRight),
-          ),
-          child: Column(children: [
-            Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    shape: BoxShape.circle),
-                child: const Icon(Icons.business_center,
-                    color: Colors.white, size: 44)),
-            const SizedBox(height: 14),
-            Text('JobMatch Business',
-                style: AppTextStyles.h2.copyWith(color: Colors.white)),
-            const SizedBox(height: 8),
-            Text(
-                esPremium
-                    ? '¡Cuenta Business activa! 🚀'
-                    : 'Potencia tu reclutamiento',
-                style: AppTextStyles.bodyLarge
-                    .copyWith(color: Colors.white.withOpacity(0.9)),
-                textAlign: TextAlign.center),
-          ]),
-        ),
-        Padding(
+        child: Column(children: [
+          _buildHeader(esPremium),
+          Padding(
             padding: const EdgeInsets.all(20),
             child: Column(children: [
-              if (_pendingId != null && !esPremium)
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                      color: AppColors.accentGreen.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                          color: AppColors.accentGreen.withOpacity(0.4))),
-                  child: Text(
-                      '¿Ya aprobaste en PayPal? Presiona "Verificar pago" arriba.',
-                      style: AppTextStyles.bodySmall
-                          .copyWith(color: AppColors.textSecondary)),
-                ),
+
+              if (_pendingId != null && !esPremium) _buildSyncBanner(),
 
               if (!esPremium) ...[
                 if (_cargando)
-                  const Padding(
-                      padding: EdgeInsets.all(24),
+                  const Padding(padding: EdgeInsets.all(24),
                       child: CircularProgressIndicator(
                           color: AppColors.accentBlue))
                 else if (_error != null)
-                  Column(children: [
-                    Text(_error!,
-                        style: AppTextStyles.bodyMedium
-                            .copyWith(color: AppColors.error)),
-                    const SizedBox(height: 12),
-                    ElevatedButton.icon(
-                        onPressed: _cargarPlanes,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Reintentar')),
-                    const SizedBox(height: 16),
-                  ])
+                  _buildError()
                 else if (_planes.isNotEmpty) ...[
-                  // Tabs planes
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                        color: card,
-                        borderRadius: BorderRadius.circular(14),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              blurRadius: 8)
-                        ]),
-                    child: Row(
-                        children: _planes.map((plan) {
-                      final sel = _planSel == plan;
-                      return Expanded(
-                          child: GestureDetector(
-                        onTap: () => setState(() => _planSel = plan),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          padding: const EdgeInsets.symmetric(vertical: 11),
-                          decoration: BoxDecoration(
-                              color: sel
-                                  ? AppColors.accentBlue
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(10)),
-                          child: Center(
-                              child: Text(_nombre(plan),
-                                  style: AppTextStyles.bodyMedium.copyWith(
-                                      color: sel
-                                          ? Colors.white
-                                          : AppColors.textSecondary,
-                                      fontWeight: FontWeight.w600))),
-                        ),
-                      ));
-                    }).toList()),
-                  ),
+                  _buildPlanTabs(),
                   const SizedBox(height: 16),
-                  if (_planSel != null)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                          color: card,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                              color: AppColors.accentBlue.withOpacity(0.3),
-                              width: 2)),
-                      child: Column(children: [
-                        Text(_precio(_planSel!),
-                            style: AppTextStyles.h2.copyWith(
-                                color: AppColors.accentBlue,
-                                fontWeight: FontWeight.w800)),
-                        const SizedBox(height: 4),
-                        Text('${_nombre(_planSel!)} · Acceso Business completo',
-                            style: AppTextStyles.bodySmall
-                                .copyWith(color: AppColors.textSecondary)),
-                      ]),
-                    ),
-                  const SizedBox(height: 16),
+                  if (_planSel != null) _buildPrecioCard(),
                 ],
               ],
 
-              // Beneficios empresa
-              Container(
-                decoration: BoxDecoration(
-                    color: card,
-                    borderRadius: BorderRadius.circular(18),
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.black.withOpacity(0.04), blurRadius: 8)
-                    ]),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                          padding: const EdgeInsets.fromLTRB(18, 18, 18, 10),
-                          child: Text('¿Qué incluye Business?',
-                              style: AppTextStyles.h4)),
-                      ...[
-                        (
-                          Icons.people_outline,
-                          'Candidatos ilimitados',
-                          'Sin límite de perfiles para revisar'
-                        ),
-                        (
-                          Icons.analytics_outlined,
-                          'Estadísticas avanzadas',
-                          'Métricas detalladas de tus vacantes'
-                        ),
-                        (
-                          Icons.bolt,
-                          'Vacantes destacadas',
-                          'Aparece primero en las búsquedas'
-                        ),
-                        (
-                          Icons.chat_bubble_outline,
-                          'Mensajería directa',
-                          'Contacta candidatos directamente'
-                        ),
-                        (
-                          Icons.verified,
-                          'Badge verificado',
-                          'Sello de empresa de confianza'
-                        ),
-                        (
-                          Icons.workspace_premium,
-                          'Soporte prioritario',
-                          'Atención preferencial'
-                        ),
-                      ].map((item) => Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 10),
-                            child: Row(children: [
-                              Container(
-                                  padding: const EdgeInsets.all(9),
-                                  decoration: BoxDecoration(
-                                      color: (esPremium
-                                              ? AppColors.accentGreen
-                                              : AppColors.accentBlue)
-                                          .withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(10)),
-                                  child: Icon(item.$1,
-                                      color: esPremium
-                                          ? AppColors.accentGreen
-                                          : AppColors.accentBlue,
-                                      size: 20)),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                    Text(item.$2,
-                                        style: AppTextStyles.subtitle1.copyWith(
-                                            fontWeight: FontWeight.bold)),
-                                    Text(item.$3,
-                                        style: AppTextStyles.bodySmall.copyWith(
-                                            color: AppColors.textSecondary)),
-                                  ])),
-                              if (esPremium)
-                                const Icon(Icons.check_circle,
-                                    color: AppColors.accentGreen, size: 16),
-                            ]),
-                          )),
-                      const SizedBox(height: 8),
-                    ]),
-              ),
+              const SizedBox(height: 16),
+              _buildBeneficios(esPremium),
               const SizedBox(height: 24),
 
-              if (!esPremium && !_cargando && _error == null) ...[
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed:
-                        (_procesando || _planSel == null) ? null : _pagar,
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.accentBlue,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14))),
-                    child: _procesando
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2))
-                        : Text(
-                            _planSel != null
-                                ? 'Suscribirse — ${_precio(_planSel!)}'
-                                : 'Suscribirse con PayPal',
-                            style: AppTextStyles.button
-                                .copyWith(color: Colors.white)),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  const Icon(Icons.lock_outline,
-                      size: 13, color: AppColors.textTertiary),
-                  const SizedBox(width: 4),
-                  Text('Pago procesado de forma segura por PayPal',
-                      style: AppTextStyles.bodySmall
-                          .copyWith(color: AppColors.textTertiary)),
-                ]),
+              if (!esPremium && !_cargando && _error == null)
+                _buildBotonPago(),
+
+              if (esPremium) ...[
+                _buildActivoBanner(),
+                const SizedBox(height: 16),
+                _buildBotonCancelar(),
               ],
 
-              if (esPremium)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                      color: AppColors.accentGreen.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color: AppColors.accentGreen.withOpacity(0.3))),
-                  child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.check_circle,
-                            color: AppColors.accentGreen),
-                        const SizedBox(width: 10),
-                        Text('Cuenta Business activa',
-                            style: AppTextStyles.subtitle1.copyWith(
-                                color: AppColors.accentGreen,
-                                fontWeight: FontWeight.bold)),
-                      ]),
-                ),
-              const SizedBox(height: 24),
-            ])),
-      ])),
+              const SizedBox(height: 32),
+            ]),
+          ),
+        ]),
+      ),
     );
   }
 
+  Widget _buildHeader(bool esPremium) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.fromLTRB(24, 36, 24, 44),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+          colors: [AppColors.accentBlue, AppColors.accentBlue.withBlue(220)],
+          begin: Alignment.topLeft, end: Alignment.bottomRight),
+    ),
+    child: Column(children: [
+      Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.2), shape: BoxShape.circle),
+        child: Icon(
+            esPremium ? Icons.business_center : Icons.business_center_outlined,
+            color: Colors.white, size: 44),
+      ),
+      const SizedBox(height: 16),
+      Text(esPremium ? '¡Business Activo! 🚀' : 'JobMatch Business',
+          style: AppTextStyles.h2.copyWith(color: Colors.white)),
+      const SizedBox(height: 8),
+      Text(
+        esPremium
+            ? 'Tu empresa tiene acceso completo a JobMatch'
+            : 'Accede a candidatos ilimitados y herramientas avanzadas',
+        style: AppTextStyles.bodyMedium.copyWith(
+            color: Colors.white.withOpacity(0.85)),
+        textAlign: TextAlign.center,
+      ),
+    ]),
+  );
+
+  Widget _buildSyncBanner() => Container(
+    margin: const EdgeInsets.only(bottom: 16),
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+        color: Colors.amber.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.amber.withOpacity(0.4))),
+    child: Row(children: [
+      const Icon(Icons.pending_outlined, color: Colors.amber),
+      const SizedBox(width: 10),
+      const Expanded(
+        child: Text(
+          'Pago pendiente de verificación. Toca "Verificar" después de completar el pago en PayPal.',
+          style: TextStyle(color: Colors.amber, fontSize: 13),
+        ),
+      ),
+    ]),
+  );
+
+  Widget _buildPlanTabs() => Row(children: _planes.map((p) {
+    final sel = _planSel == p;
+    return Expanded(child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: GestureDetector(
+        onTap: () => setState(() => _planSel = p),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+              color: sel ? AppColors.accentBlue : AppColors.cardBackground,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: sel ? AppColors.accentBlue : AppColors.borderLight)),
+          child: Text(_nombrePlan(p),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: sel ? Colors.white : AppColors.textSecondary,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13)),
+        ),
+      ),
+    ));
+  }).toList());
+
+  Widget _buildPrecioCard() => Container(
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+        color: AppColors.cardBackground,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderLight)),
+    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Text(_precioFormateado(_planSel!),
+          style: AppTextStyles.h2.copyWith(color: AppColors.accentBlue)),
+    ]),
+  );
+
+  Widget _buildBeneficios(bool esPremium) {
+    final items = [
+      (Icons.people_alt, 'Candidatos ilimitados',
+          'Sin límite de perfiles por vacante'),
+      (Icons.work_outline, 'Vacantes ilimitadas',
+          'Publica todas las plazas que necesites'),
+      (Icons.analytics, 'Analítica avanzada',
+          'Estadísticas detalladas de tus publicaciones'),
+      (Icons.verified, 'Perfil verificado',
+          'Mayor confianza ante los candidatos'),
+    ];
+    return Column(children: [
+      Text('Beneficios Business',
+          style: AppTextStyles.subtitle1.copyWith(fontWeight: FontWeight.bold)),
+      const SizedBox(height: 12),
+      ...items.map((it) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+                color: AppColors.accentBlue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8)),
+            child: Icon(it.$1, color: AppColors.accentBlue, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(it.$2, style: AppTextStyles.bodyMedium.copyWith(
+                fontWeight: FontWeight.bold)),
+            Text(it.$3, style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textSecondary)),
+          ])),
+          if (esPremium)
+            const Icon(Icons.check_circle,
+                color: AppColors.accentGreen, size: 18),
+        ]),
+      )),
+    ]);
+  }
+
+  Widget _buildBotonPago() => Column(children: [
+    SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: (_procesando || _planSel == null) ? null : _pagar,
+        style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.accentBlue,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14))),
+        child: _procesando
+            ? const SizedBox(width: 22, height: 22,
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 2))
+            : Text(_planSel != null
+                ? 'Suscribirse — ${_precioFormateado(_planSel!)}'
+                : 'Suscribirse con PayPal',
+                style: AppTextStyles.button.copyWith(color: Colors.white)),
+      ),
+    ),
+    const SizedBox(height: 10),
+    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Icon(Icons.lock_outline, size: 13, color: AppColors.textTertiary),
+      const SizedBox(width: 4),
+      Text('Pago procesado de forma segura por PayPal',
+          style: AppTextStyles.bodySmall.copyWith(
+              color: AppColors.textTertiary)),
+    ]),
+  ]);
+
+  Widget _buildActivoBanner() => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+        color: AppColors.accentGreen.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.accentGreen.withOpacity(0.3))),
+    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Icon(Icons.check_circle, color: AppColors.accentGreen),
+      const SizedBox(width: 10),
+      Text('Cuenta Business Activa',
+          style: AppTextStyles.subtitle1.copyWith(
+              color: AppColors.accentGreen, fontWeight: FontWeight.bold)),
+    ]),
+  );
+
+  Widget _buildBotonCancelar() => SizedBox(
+    width: double.infinity,
+    child: OutlinedButton.icon(
+      onPressed: _procesando ? null : _confirmarCancelacion,
+      icon: const Icon(Icons.cancel_outlined, color: AppColors.error, size: 18),
+      label: const Text('Cancelar suscripción',
+          style: TextStyle(color: AppColors.error)),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        side: const BorderSide(color: AppColors.error),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    ),
+  );
+
+  Widget _buildError() => Column(children: [
+    const SizedBox(height: 16),
+    const Icon(Icons.cloud_off_outlined, size: 48, color: AppColors.textTertiary),
+    const SizedBox(height: 8),
+    Text(_error!,
+        style: const TextStyle(color: AppColors.error),
+        textAlign: TextAlign.center),
+    const SizedBox(height: 12),
+    ElevatedButton.icon(
+        onPressed: _cargarPlanes,
+        style: ElevatedButton.styleFrom(backgroundColor: AppColors.accentBlue),
+        icon: const Icon(Icons.refresh, color: Colors.white),
+        label: const Text('Reintentar',
+            style: TextStyle(color: Colors.white))),
+    const SizedBox(height: 16),
+  ]);
+
+  // ── Lógica de negocio ─────────────────────────────────────────────────────
   Future<void> _pagar() async {
-    final codigo = _codigo(_planSel ?? {});
-    if (codigo.isEmpty) {
-      _snack('Plan no válido', isError: true);
-      return;
-    }
+    if (_planSel == null) return;
     setState(() => _procesando = true);
     try {
+      final cycle = _billingCycle(_planSel!);
+      // FIX: el repo ya no recibe planCode, solo billingCycle
       final res = await _repo.crearSuscripcion(
-          planCode: codigo,
-          billingCycle: _billingCycle(_planSel!),
-          returnUrl: _returnUrl,
-          cancelUrl: _cancelUrl);
+        billingCycle: cycle,
+        returnUrl:    _returnUrl,
+        cancelUrl:    _cancelUrl,
+      );
       final approveUrl = res['approve_url'] as String?;
-      final subId = res['paypal_subscription_id'] as String?;
+      final subId      = res['paypal_subscription_id'] as String?;
+
       if (approveUrl == null || approveUrl.isEmpty) {
         _snack('PayPal no devolvió URL. Intenta de nuevo.', isError: true);
         return;
       }
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('pending_paypal_sub_id_empresa', subId ?? '');
       setState(() => _pendingId = subId);
+
       final uri = Uri.parse(approveUrl);
-      if (await canLaunchUrl(uri))
+      if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
-      else
-        _snack('No se puede abrir el navegador', isError: true);
+      } else {
+        _snack('No se pudo abrir el navegador', isError: true);
+      }
     } catch (e) {
       _snack('Error: $e', isError: true);
     } finally {
@@ -434,49 +496,100 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen> {
     setState(() => _procesando = true);
     try {
       await _repo.sincronizar(_pendingId!);
-      await context.read<AuthProvider>().verificarSesion();
-      setState(() => _pendingId = null);
-      if (mounted)
-        showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (_) => AlertDialog(
-                  content: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Container(
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                            color: AppColors.accentBlue,
-                            shape: BoxShape.circle),
-                        child: const Icon(Icons.business_center,
-                            color: Colors.white, size: 44)),
-                    const SizedBox(height: 14),
-                    Text('¡Business activado! 🚀',
-                        style: AppTextStyles.h3, textAlign: TextAlign.center),
-                    const SizedBox(height: 8),
-                    Text('Tu empresa ahora tiene acceso completo.',
-                        style: AppTextStyles.bodyMedium
-                            .copyWith(color: AppColors.textSecondary),
-                        textAlign: TextAlign.center),
-                  ]),
-                  actions: [
-                    SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: () {
-                            Navigator.pop(context);
-                            context.pop();
-                          },
-                          style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.accentBlue),
-                          child: const Text('¡Comenzar!'),
-                        ))
-                  ],
-                ));
+      await context.read<AuthProvider>().refrescarUsuario();
+      await _limpiarPendiente();
+      await _cargarSuscripcion();
+
+      if (mounted && context.read<AuthProvider>().esPremium) {
+        _showSuccessDialog();
+      } else {
+        _snack('Pago pendiente de confirmación por PayPal');
+      }
     } catch (e) {
-      _snack('No se pudo verificar. ¿Ya aprobaste?', isError: true);
+      _snack('No se pudo verificar. ¿Ya aprobaste en PayPal?', isError: true);
     } finally {
       if (mounted) setState(() => _procesando = false);
     }
+  }
+
+  void _confirmarCancelacion() {
+    showDialog(context: context, builder: (_) => AlertDialog(
+      title: const Text('¿Cancelar suscripción Business?'),
+      content: const Text(
+          'Perderás acceso a las funciones Business al término del período actual. '
+          'Esta acción no genera reembolso.'),
+      actions: [
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Mantener Business')),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: () { Navigator.pop(context); _cancelar(); },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Sí, cancelar'),
+          ),
+        ),
+      ],
+    ));
+  }
+
+  Future<void> _cancelar() async {
+    final subId = _paypalSubId ?? _pendingId;
+    if (subId == null) {
+      _snack('No se encontró la suscripción activa', isError: true);
+      return;
+    }
+    setState(() => _procesando = true);
+    try {
+      await _repo.cancelar(subId, razon: 'Cancelada por empresa desde la app');
+      await context.read<AuthProvider>().refrescarUsuario();
+      await _cargarSuscripcion();
+      if (mounted) _snack('Suscripción cancelada correctamente');
+    } catch (e) {
+      _snack('Error al cancelar: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _procesando = false);
+    }
+  }
+
+  void _showSuccessDialog() {
+    showDialog(
+      context: context, barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+                color: AppColors.accentBlue, shape: BoxShape.circle),
+            child: const Icon(Icons.business_center,
+                color: Colors.white, size: 44)),
+          const SizedBox(height: 14),
+          Text('¡Business Activado! 🚀',
+              style: AppTextStyles.h3, textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          Text('Tu empresa ahora tiene acceso completo a JobMatch.',
+              style: AppTextStyles.bodyMedium.copyWith(
+                  color: AppColors.textSecondary),
+              textAlign: TextAlign.center),
+        ]),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () { Navigator.pop(context); context.pop(); },
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.accentBlue),
+              child: const Text('¡Comenzar!'),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _snack(String msg, {bool isError = false}) =>
@@ -484,7 +597,7 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen> {
         content: Text(msg),
         backgroundColor: isError ? AppColors.error : AppColors.accentGreen,
         behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: isError ? 5 : 2),
+        duration: Duration(seconds: isError ? 5 : 3),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ));
 }

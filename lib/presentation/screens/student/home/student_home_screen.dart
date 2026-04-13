@@ -254,7 +254,7 @@ class StudentHomeScreen extends StatelessWidget {
           style: AppTextStyles.bodyLarge.copyWith(
               color: AppColors.textSecondary), textAlign: TextAlign.center),
       const SizedBox(height: 32),
-      ElevatedButton.icon(onPressed: () => context.push(AppRoutes.premium),
+      ElevatedButton.icon(onPressed: () => context.push(AppRoutes.studentPremium),
           icon: const Icon(Icons.star), label: const Text('Mejorar a Premium')),
     ])),
   );
