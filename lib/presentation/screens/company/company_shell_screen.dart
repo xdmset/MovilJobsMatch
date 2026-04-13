@@ -1,10 +1,14 @@
 // lib/presentation/screens/company/company_shell_screen.dart
+//
+// Este archivo se mantiene por compatibilidad pero la lógica real
+// está en CompanyHomeScreen. Ambos usan CompanyShellNotifier.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/company_provider.dart';
 import 'home/company_home_tab.dart';
+import 'home/company_home_screen.dart' show CompanyShellNotifier;
 import 'vacancies/vacancies_list_screen.dart';
 import 'candidates/candidates_screen.dart';
 import 'profile/company_profile_screen.dart';
@@ -18,10 +22,30 @@ class CompanyShellScreen extends StatefulWidget {
 
 class _CompanyShellScreenState extends State<CompanyShellScreen> {
   int _currentIndex = 0;
+  final _shellNotifier = CompanyShellNotifier();
+  late final List<Widget> _pages;
 
   @override
   void initState() {
     super.initState();
+
+    _pages = [
+      CompanyHomeTab(
+        onIrACandidatos: (vacanteId, titulo) {
+          _shellNotifier.filtrarPorVacante(vacanteId, titulo);
+          setState(() => _currentIndex = 2);
+        },
+      ),
+      VacanciesListScreen(
+        onVerCandidatos: (vacanteId, titulo) {
+          _shellNotifier.filtrarPorVacante(vacanteId, titulo);
+          setState(() => _currentIndex = 2);
+        },
+      ),
+      CandidatesScreen(notifier: _shellNotifier),
+      const CompanyProfileScreen(),
+    ];
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final id = context.read<AuthProvider>().usuario?.id;
       if (id != null) {
@@ -30,17 +54,24 @@ class _CompanyShellScreenState extends State<CompanyShellScreen> {
     });
   }
 
-  void _onTap(int index) {
-    setState(() => _currentIndex = index);
+  @override
+  void dispose() {
+    _shellNotifier.dispose();
+    super.dispose();
   }
 
-  // Las 4 pestañas — IndexedStack las mantiene vivas en memoria
-  static const _pages = [
-    CompanyHomeTab(),
-    VacanciesListScreen(),
-    CandidatesScreen(),
-    CompanyProfileScreen(),
-  ];
+  void _onTap(int index) {
+    if (_currentIndex == 2 && index != 2) {
+      _shellNotifier.limpiarFiltro();
+    }
+    setState(() => _currentIndex = index);
+    if (index == 2) {
+      final id = context.read<AuthProvider>().usuario?.id;
+      if (id != null) {
+        context.read<CompanyProvider>().recargarCandidatos(id);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

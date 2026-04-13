@@ -1,21 +1,10 @@
 // lib/data/repositories/company_repository.dart
 //
-// ENDPOINTS:
-//
-// GET  /swipes/empresa/{empresa_id}/candidatos?vacante_id={vacante_id}
-//      → CandidateFeedItem[] — REQUIERE vacante_id como query param obligatorio
-//      → Se llama en paralelo por cada vacante y se combinan resultados
-//
-// POST /swipes/empresa/{empresa_id}
-//      body: { estudiante_id, vacante_id, interes_empresa: bool }
-//      response: MatchResponse | null
-//
-// GET  /postulaciones/empresa/{empresa_id}
-//      query: estado?, institucion_educativa?, nivel_academico?, ubicacion?
-//      response: PostulacionRead[]
-//
-// GET  /vacante/historial/empresa/{empresa_id}
-//      → VacanteHistorialEmpresa[] con métricas de likes/matches/vistas
+// NOTA IMPORTANTE SOBRE EL BACKEND:
+// El endpoint GET /swipes/empresa/{id}/candidatos?vacante_id=X
+// devuelve TODOS los estudiantes incluyendo los que ya_dio_like=false.
+// Filtramos en el cliente con ya_dio_like == true para mostrar solo
+// los que realmente dieron like a esa vacante.
 
 import 'package:flutter/material.dart';
 import '../../core/services/api_service.dart';
@@ -29,7 +18,8 @@ class CompanyRepository {
   // ── Perfil empresa ────────────────────────────────────────────────────────
   Future<PerfilEmpresa> getPerfil(int userId) async {
     final raw = await _api.get('/perfil_empresa/$userId', auth: true);
-    final map = raw is Map<String, dynamic> ? raw : (raw['data'] as Map<String, dynamic>);
+    final map = raw is Map<String, dynamic>
+        ? raw : (raw['data'] as Map<String, dynamic>);
     return PerfilEmpresa.fromJson(map);
   }
 
@@ -45,7 +35,8 @@ class CompanyRepository {
     if (ubicacionSede?.isNotEmpty == true) body['ubicacion_sede'] = ubicacionSede;
     debugPrint('[CompanyRepo] PUT /perfil_empresa/$userId body: $body');
     final raw = await _api.put('/perfil_empresa/$userId', body, auth: true);
-    return PerfilEmpresa.fromJson(raw is Map<String, dynamic> ? raw : raw['data']);
+    return PerfilEmpresa.fromJson(
+        raw is Map<String, dynamic> ? raw : raw['data']);
   }
 
   // ── Vacantes ──────────────────────────────────────────────────────────────
@@ -54,7 +45,7 @@ class CompanyRepository {
     final lista = raw is List ? raw : (raw['data'] as List? ?? []);
     final filtradas = lista.cast<Map<String, dynamic>>()
         .where((v) => v['empresa_id'] == empresaId).toList();
-    debugPrint('[CompanyRepo] vacantes básicas: ${filtradas.length} de empresa $empresaId');
+    debugPrint('[CompanyRepo] vacantes: ${filtradas.length} de empresa $empresaId');
     return filtradas;
   }
 
@@ -80,8 +71,6 @@ class CompanyRepository {
       _api.delete('/vacante/$vacanteId');
 
   // ── Historial de vacantes con métricas ────────────────────────────────────
-  // GET /vacante/historial/empresa/{empresa_id}
-  // Incluye: total_likes_estudiantes, total_matches, total_visualizaciones, etc.
   Future<List<Map<String, dynamic>>> getHistorialVacantes(int empresaId) async {
     try {
       final raw = await _api.get(
@@ -90,7 +79,7 @@ class CompanyRepository {
       debugPrint('[CompanyRepo] historial vacantes: ${lista.length} con métricas');
       return lista.cast<Map<String, dynamic>>();
     } catch (e) {
-      debugPrint('[CompanyRepo] getHistorialVacantes error: $e — fallback a básico');
+      debugPrint('[CompanyRepo] getHistorialVacantes error: $e — fallback');
       return getVacantes(empresaId);
     }
   }
@@ -98,12 +87,9 @@ class CompanyRepository {
   // ── Feed de candidatos ────────────────────────────────────────────────────
   // GET /swipes/empresa/{empresa_id}/candidatos?vacante_id={vacante_id}
   //
-  // IMPORTANTE: el endpoint requiere vacante_id como query param obligatorio
-  // (devuelve 422 si se llama sin él). Se llama en paralelo para cada
-  // vacante de la empresa y se combinan los resultados.
-  //
-  // vacanteIds: lista de IDs de vacantes activas de la empresa,
-  // ya disponibles desde getHistorialVacantes en el dashboard.
+  // FIX CRÍTICO: el backend devuelve TODOS los estudiantes con ya_dio_like
+  // tanto true como false. Filtramos en cliente solo los que ya_dio_like==true
+  // para mostrar únicamente los que realmente dieron like a esa vacante.
   Future<List<Map<String, dynamic>>> getCandidatosFeed(
       int empresaId, List<int> vacanteIds) async {
     if (vacanteIds.isEmpty) {
@@ -112,23 +98,22 @@ class CompanyRepository {
     }
 
     try {
-      // Llamar en paralelo para todas las vacantes
       final resultados = await Future.wait(
         vacanteIds.map((id) => _getCandidatosPorVacante(empresaId, id)),
       );
 
-      // Aplanar y deduplicar por estudiante_id+vacante_id
+      // Aplanar — ya vienen filtrados por ya_dio_like=true
+      final todos = resultados.expand((lista) => lista).toList();
+
+      // Deduplicar por estudiante_id+vacante_id
       final vistos = <String>{};
-      final unicos = resultados
-          .expand((lista) => lista)
-          .where((c) {
-            final key = '${c['estudiante_id']}_${c['vacante_id']}';
-            return vistos.add(key);
-          })
-          .toList();
+      final unicos = todos.where((c) {
+        final key = '${c['estudiante_id']}_${c['vacante_id']}';
+        return vistos.add(key);
+      }).toList();
 
       debugPrint('[CompanyRepo] candidatos feed total: ${unicos.length} '
-          'de ${vacanteIds.length} vacantes');
+          '(solo con ya_dio_like=true)');
       return unicos;
     } catch (e) {
       debugPrint('[CompanyRepo] getCandidatosFeed error: $e');
@@ -145,9 +130,9 @@ class CompanyRepository {
         auth: true,
       );
       final lista = raw is List ? raw : (raw['data'] as List? ?? []);
-      debugPrint('[CompanyRepo] candidatos vacante $vacanteId: ${lista.length}');
+      debugPrint('[CompanyRepo] candidatos vacante $vacanteId: ${lista.length} total del backend');
 
-      return lista.cast<Map<String, dynamic>>().map((c) {
+      final normalizados = lista.cast<Map<String, dynamic>>().map((c) {
         final n = Map<String, dynamic>.from(c);
 
         // El API devuelve 'usuario_id', la UI espera 'estudiante_id'
@@ -155,10 +140,10 @@ class CompanyRepository {
           n['estudiante_id'] = n['usuario_id'];
         }
 
-        // Siempre inyectar el vacante_id para que la UI pueda hacer el swipe
+        // Siempre inyectar el vacante_id
         n['vacante_id'] = vacanteId;
 
-        // Aplanar perfil_estudiante para acceso directo en la UI
+        // Aplanar perfil_estudiante al nivel raíz para acceso directo en la UI
         final perfil = n['perfil_estudiante'];
         if (perfil is Map<String, dynamic>) {
           n['nombre_completo']       = perfil['nombre_completo'];
@@ -167,18 +152,36 @@ class CompanyRepository {
           n['ubicacion']             = perfil['ubicacion'];
           n['modalidad_preferida']   = perfil['modalidad_preferida'];
           n['foto_perfil_url']       = perfil['foto_perfil_url'];
+          // FIX: incluir cv_url y cv_tipo_archivo para poder abrirlos
           n['cv_url']                = perfil['cv_url'];
+          n['cv_tipo_archivo']       = perfil['cv_tipo_archivo'];
+          n['biografia']             = perfil['biografia'];
+          n['habilidades']           = perfil['habilidades'];
+          n['fecha_nacimiento']      = perfil['fecha_nacimiento'];
         }
         return n;
       }).toList();
+
+      // FIX: filtrar solo candidatos que realmente dieron like
+      // El backend devuelve ya_dio_like=false para estudiantes que NO dieron like
+      final conLike = normalizados.where((c) {
+        final yaDioLike = c['ya_dio_like'];
+        // Si el campo no existe asumir true para no perder datos
+        if (yaDioLike == null) return true;
+        return yaDioLike == true;
+      }).toList();
+
+      debugPrint('[CompanyRepo] candidatos vacante $vacanteId: '
+          '${conLike.length} con like (de ${normalizados.length} total)');
+      return conLike;
     } catch (e) {
-      debugPrint('[CompanyRepo] _getCandidatosPorVacante vacante=$vacanteId: $e');
+      debugPrint('[CompanyRepo] _getCandidatosPorVacante '
+          'vacante=$vacanteId: $e');
       return [];
     }
   }
 
-  // ── Postulaciones con filtros opcionales ──────────────────────────────────
-  // GET /postulaciones/empresa/{empresa_id}
+  // ── Postulaciones ─────────────────────────────────────────────────────────
   Future<List<Map<String, dynamic>>> getPostulaciones(int empresaId, {
     String? estado,
     String? institucionEducativa,
@@ -186,10 +189,14 @@ class CompanyRepository {
     String? ubicacion,
   }) async {
     final query = <String, String>{};
-    if (estado?.isNotEmpty == true)              query['estado'] = estado!;
-    if (institucionEducativa?.isNotEmpty == true) query['institucion_educativa'] = institucionEducativa!;
-    if (nivelAcademico?.isNotEmpty == true)      query['nivel_academico'] = nivelAcademico!;
-    if (ubicacion?.isNotEmpty == true)           query['ubicacion'] = ubicacion!;
+    if (estado?.isNotEmpty == true)
+      query['estado'] = estado!;
+    if (institucionEducativa?.isNotEmpty == true)
+      query['institucion_educativa'] = institucionEducativa!;
+    if (nivelAcademico?.isNotEmpty == true)
+      query['nivel_academico'] = nivelAcademico!;
+    if (ubicacion?.isNotEmpty == true)
+      query['ubicacion'] = ubicacion!;
 
     final raw = await _api.get(
         '/postulaciones/empresa/$empresaId',
@@ -202,9 +209,6 @@ class CompanyRepository {
   }
 
   // ── Swipe empresa → estudiante ────────────────────────────────────────────
-  // POST /swipes/empresa/{empresa_id}
-  // body: { estudiante_id, vacante_id, interes_empresa: bool }
-  // response: MatchResponse | null
   Future<Map<String, dynamic>?> swipeEstudiante({
     required int empresaId,
     required int estudianteId,
@@ -230,7 +234,6 @@ class CompanyRepository {
   }
 
   // ── Cambiar estado postulación ────────────────────────────────────────────
-  // PUT /postulaciones/{postulacion_id}/estado
   Future<void> cambiarEstadoPostulacion(int postId, String estado) async {
     await _api.put('/postulaciones/$postId/estado',
         {'nuevo_estado': estado}, auth: true);

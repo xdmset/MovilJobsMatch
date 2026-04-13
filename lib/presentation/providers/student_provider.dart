@@ -6,8 +6,10 @@ import '../../data/repositories/student_repository.dart';
 class StudentProvider extends ChangeNotifier {
   final _repo = StudentRepository.instance;
 
-  // ── Vacantes (feed del servidor) ──────────────────────────────────────────
-  List<Map<String, dynamic>> _vacantes      = [];
+  int? _estudianteId;
+
+  // ── Feed ──────────────────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _vacantes     = [];
   int  _currentIndex  = 0;
   int  _dailySwipes   = 0;
   final int _maxSwipes = 20;
@@ -17,22 +19,20 @@ class StudentProvider extends ChangeNotifier {
   String? _filtroUbicacion;
   double? _filtroSueldoMin;
 
-  List<Map<String, dynamic>> get vacantes    => _vacantes;
-  int  get currentIndex                       => _currentIndex;
-  bool get hasReachedLimit                    => _dailySwipes >= _maxSwipes;
-  int  get remainingSwipes                    => _maxSwipes - _dailySwipes;
-  bool get cargandoVacantes                   => _cargandoVacantes;
-  String? get filtroModalidad                 => _filtroModalidad;
-  String? get filtroUbicacion                 => _filtroUbicacion;
-  double? get filtroSueldoMin                 => _filtroSueldoMin;
+  List<Map<String, dynamic>> get vacantes      => _vacantes;
+  int  get currentIndex                         => _currentIndex;
+  bool get hasReachedLimit                      => _dailySwipes >= _maxSwipes;
+  int  get remainingSwipes                      => _maxSwipes - _dailySwipes;
+  bool get cargandoVacantes                     => _cargandoVacantes;
+  String? get filtroModalidad                   => _filtroModalidad;
+  String? get filtroUbicacion                   => _filtroUbicacion;
+  double? get filtroSueldoMin                   => _filtroSueldoMin;
 
   Map<String, dynamic>? get currentVacancy =>
       _currentIndex < _vacantes.length ? _vacantes[_currentIndex] : null;
 
-  // ── Matches del servidor ──────────────────────────────────────────────────
-  // GET /matches/estudiante/{id} → [ { id, estudiante_id, vacante_id, fecha_match } ]
+  // ── Matches ───────────────────────────────────────────────────────────────
   final List<Map<String, dynamic>> _matchesServidor = [];
-  // Matches de sesión (enriquecidos con datos de la vacante)
   final List<Map<String, dynamic>> _matchesSesion   = [];
 
   List<Map<String, dynamic>> get matches =>
@@ -45,27 +45,35 @@ class StudentProvider extends ChangeNotifier {
   bool _cargandoHistorial = false;
   bool get cargandoHistorial => _cargandoHistorial;
 
-  // IDs ya vistos para no repetir
+  // FIX: Set de IDs vistos — única fuente de verdad para deduplicación
   final Set<int> _vacanteIdsVistas = {};
 
-  // ── Cargar historial del servidor ─────────────────────────────────────────
+  // ── Cargar historial ──────────────────────────────────────────────────────
   Future<void> cargarHistorial(int estudianteId) async {
+    _estudianteId = estudianteId;
     _cargandoHistorial = true;
     notifyListeners();
     try {
       final serverItems = await _repo.getHistorialEstudiante(estudianteId);
       debugPrint('[StudentProvider] historial: ${serverItems.length} items');
 
+      // Reconstruir el set de IDs vistos desde el servidor
       _vacanteIdsVistas.clear();
       for (final v in serverItems) {
         final id = v['id'] as int?;
+        if (id != null) _vacanteIdsVistas.add(id);
+      }
+      // También añadir los que registramos localmente en esta sesión
+      for (final h in _historial) {
+        final id = h['id'] as int?;
         if (id != null) _vacanteIdsVistas.add(id);
       }
 
       final deServidor = serverItems.map((v) {
         final leDioLike = v['le_dio_like'] as bool? ?? false;
         final ts = leDioLike
-            ? (v['fecha_like'] as String? ?? v['ultima_visualizacion'] as String? ?? '')
+            ? (v['fecha_like'] as String?
+                ?? v['ultima_visualizacion'] as String? ?? '')
             : (v['ultima_visualizacion'] as String? ?? '');
         return <String, dynamic>{
           ...v,
@@ -76,6 +84,7 @@ class StudentProvider extends ChangeNotifier {
         };
       }).toList();
 
+      // Mantener entradas locales que aún no llegaron al servidor
       final soloLocales = _historial
           .where((h) => !_vacanteIdsVistas.contains(h['id'] as int?))
           .toList();
@@ -88,7 +97,8 @@ class StudentProvider extends ChangeNotifier {
           (b['timestamp'] as String? ?? '')
               .compareTo(a['timestamp'] as String? ?? ''));
 
-      if (_vacantes.isNotEmpty) _sincronizarIndice();
+      // FIX: siempre filtrar vacantes en memoria al actualizar historial
+      _filtrarVacantesVistas();
 
     } catch (e) {
       debugPrint('[StudentProvider] cargarHistorial error: $e');
@@ -97,17 +107,17 @@ class StudentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Cargar matches reales del servidor ────────────────────────────────────
+  // ── Cargar matches ────────────────────────────────────────────────────────
   Future<void> cargarMatches(int estudianteId) async {
+    _estudianteId = estudianteId;
     try {
       final lista = await _repo.getMatches(estudianteId);
       _matchesServidor.clear();
       for (final m in lista) {
-        // Enriquecer con datos de vacante si están en historial
         final vacanteId = m['vacante_id'] as int?;
         final vacanteData = vacanteId != null
-            ? _historial.firstWhere((h) => h['id'] == vacanteId,
-                orElse: () => {})
+            ? _historial.firstWhere(
+                (h) => h['id'] == vacanteId, orElse: () => {})
             : <String, dynamic>{};
         _matchesServidor.add({
           ...m,
@@ -120,84 +130,123 @@ class StudentProvider extends ChangeNotifier {
     }
   }
 
-  // ── Cargar vacantes usando el feed del servidor ───────────────────────────
-  // Primero intenta GET /swipes/{id}/vacantes (feed sin repetir)
-  // Si falla, usa GET /vacante/ con filtros y aplica filtrado manual
+  // ── Cargar vacantes ───────────────────────────────────────────────────────
   Future<void> cargarVacantes({
-    String? modalidad, String? ubicacion, double? sueldoMin,
-    bool resetIndex = false, int? estudianteId,
+    String? modalidad,
+    String? ubicacion,
+    double? sueldoMin,
+    bool resetIndex = false,
+    int? estudianteId,
   }) async {
+    if (estudianteId != null) _estudianteId = estudianteId;
+    final id = _estudianteId;
+
     _cargandoVacantes = true;
     notifyListeners();
+
     try {
+      final modFinal    = modalidad ?? _filtroModalidad;
+      final ubicFinal   = ubicacion ?? _filtroUbicacion;
+      final sueldoFinal = sueldoMin ?? _filtroSueldoMin;
+      final hayFiltros  =
+          modFinal != null || ubicFinal != null || sueldoFinal != null;
+
       List<Map<String, dynamic>> lista = [];
 
-      if (estudianteId != null && modalidad == null && ubicacion == null && sueldoMin == null) {
-        // Usar feed del servidor (ya filtra las vistas)
-        lista = await _repo.getVacantesFeed(estudianteId);
+      if (!hayFiltros && id != null) {
+        // Feed del servidor ya filtra las vistas, pero deduplicamos por si acaso
+        lista = await _repo.getVacantesFeed(id);
       } else {
-        // Usar endpoint general con filtros
         lista = await _repo.getVacantes(
-          modalidad: modalidad ?? _filtroModalidad,
-          ubicacion: ubicacion ?? _filtroUbicacion,
-          sueldoMin: sueldoMin ?? _filtroSueldoMin,
+          modalidad: modFinal,
+          ubicacion: ubicFinal,
+          sueldoMin: sueldoFinal,
         );
-        // Filtrar las ya vistas manualmente
-        if (_vacanteIdsVistas.isNotEmpty) {
-          lista = lista.where((v) {
-            final id = v['id'] as int?;
-            return id != null && !_vacanteIdsVistas.contains(id);
-          }).toList();
-        }
       }
 
+      // FIX: deduplicar SIEMPRE, sin importar si el backend ya lo hizo
+      lista = _deduplicar(lista);
+
       _vacantes = lista;
-      debugPrint('[StudentProvider] vacantes: ${lista.length} disponibles');
+      debugPrint('[StudentProvider] vacantes disponibles: ${lista.length} '
+          '(filtros: mod=$modFinal, ubic=$ubicFinal, sueldo=$sueldoFinal)');
 
       if (resetIndex) {
         _currentIndex = 0;
-        _dailySwipes  = 0;
       } else {
-        _sincronizarIndice();
+        _currentIndex = 0;
       }
     } catch (e) {
       debugPrint('[StudentProvider] cargarVacantes error: $e');
       _vacantes = [];
+      _currentIndex = 0;
     }
     _cargandoVacantes = false;
     notifyListeners();
   }
 
-  void _sincronizarIndice() {
-    _currentIndex = 0;
-    _dailySwipes  = _vacanteIdsVistas.length.clamp(0, _maxSwipes);
+  // FIX: elimina vacantes ya vistas Y deduplica por id dentro del mismo array
+  List<Map<String, dynamic>> _deduplicar(List<Map<String, dynamic>> lista) {
+    final vistos = <int>{};
+    final resultado = <Map<String, dynamic>>[];
+    for (final v in lista) {
+      final id = v['id'] as int?;
+      if (id == null) continue;
+      // Excluir si ya fue vista o ya la procesamos en esta misma lista
+      if (_vacanteIdsVistas.contains(id)) continue;
+      if (vistos.contains(id)) continue;
+      vistos.add(id);
+      resultado.add(v);
+    }
+    return resultado;
   }
 
+  // Elimina del array en memoria las vacantes que ya se registraron como vistas
+  void _filtrarVacantesVistas() {
+    if (_vacanteIdsVistas.isEmpty) {
+      _currentIndex = 0;
+      return;
+    }
+    _vacantes = _deduplicar(_vacantes);
+    _currentIndex = 0;
+    _dailySwipes = _vacanteIdsVistas.length.clamp(0, _maxSwipes);
+  }
+
+  // ── Aplicar / limpiar filtros ─────────────────────────────────────────────
   Future<void> aplicarFiltros({
-    String? modalidad, String? ubicacion, double? sueldoMin,
+    String? modalidad,
+    String? ubicacion,
+    double? sueldoMin,
   }) async {
     _filtroModalidad = modalidad;
     _filtroUbicacion = ubicacion;
     _filtroSueldoMin = sueldoMin;
     await cargarVacantes(
-        modalidad: modalidad, ubicacion: ubicacion,
-        sueldoMin: sueldoMin, resetIndex: true);
+      modalidad: modalidad,
+      ubicacion: ubicacion,
+      sueldoMin: sueldoMin,
+      resetIndex: true,
+    );
   }
 
   void limpiarFiltros() {
-    _filtroModalidad = null; _filtroUbicacion = null; _filtroSueldoMin = null;
-    cargarVacantes(resetIndex: false);
+    _filtroModalidad = null;
+    _filtroUbicacion = null;
+    _filtroSueldoMin = null;
+    cargarVacantes(resetIndex: true);
   }
 
   // ── Like ──────────────────────────────────────────────────────────────────
   Future<bool> likeVacancy(int estudianteId) async {
     if (hasReachedLimit || currentVacancy == null) return false;
+    _estudianteId = estudianteId;
     final v         = currentVacancy!;
     final vacanteId = v['id'] as int?;
 
+    // Marcar como vista ANTES de avanzar
     if (vacanteId != null) {
-      await _repo.registrarVista(vacanteId);
       _vacanteIdsVistas.add(vacanteId);
+      await _repo.registrarVista(vacanteId);
     }
 
     _dailySwipes++;
@@ -205,7 +254,8 @@ class StudentProvider extends ChangeNotifier {
 
     bool esMatch = false;
     if (vacanteId != null) {
-      final matchRes = await _repo.registrarSwipe(estudianteId, vacanteId, true);
+      final matchRes =
+          await _repo.registrarSwipe(estudianteId, vacanteId, true);
       if (matchRes != null) {
         esMatch = true;
         _matchesSesion.insert(0, {...matchRes, 'vacante': v});
@@ -213,9 +263,12 @@ class StudentProvider extends ChangeNotifier {
     }
 
     final localItem = <String, dynamic>{
-      ...v, 'tipo': 'like',
-      'timestamp':   DateTime.now().toIso8601String(),
-      'match':       esMatch, 'le_dio_like': true, 'total_visualizaciones': 1,
+      ...v,
+      'tipo':      'like',
+      'timestamp': DateTime.now().toIso8601String(),
+      'match':     esMatch,
+      'le_dio_like': true,
+      'total_visualizaciones': 1,
     };
     _historial.removeWhere((h) => h['id'] == vacanteId);
     _historial.insert(0, localItem);
@@ -226,18 +279,23 @@ class StudentProvider extends ChangeNotifier {
   // ── Dislike ───────────────────────────────────────────────────────────────
   Future<void> dislikeVacancy(int estudianteId) async {
     if (hasReachedLimit || currentVacancy == null) return;
+    _estudianteId = estudianteId;
     final v         = currentVacancy!;
     final vacanteId = v['id'] as int?;
 
+    // Marcar como vista ANTES de avanzar
     if (vacanteId != null) {
-      await _repo.registrarVista(vacanteId);
       _vacanteIdsVistas.add(vacanteId);
+      await _repo.registrarVista(vacanteId);
     }
 
     final localItem = <String, dynamic>{
-      ...v, 'tipo': 'dislike',
-      'timestamp':   DateTime.now().toIso8601String(),
-      'match':       false, 'le_dio_like': false, 'total_visualizaciones': 1,
+      ...v,
+      'tipo':      'dislike',
+      'timestamp': DateTime.now().toIso8601String(),
+      'match':     false,
+      'le_dio_like': false,
+      'total_visualizaciones': 1,
     };
     _historial.removeWhere((h) => h['id'] == vacanteId);
     _historial.insert(0, localItem);
@@ -254,12 +312,13 @@ class StudentProvider extends ChangeNotifier {
   // ── Cambiar dislike → like ────────────────────────────────────────────────
   Future<bool> cambiarOpinion(int estudianteId, int historialIndex) async {
     if (historialIndex < 0 || historialIndex >= _historial.length) return false;
-    final item      = Map<String, dynamic>.from(_historial[historialIndex]);
+    final item = Map<String, dynamic>.from(_historial[historialIndex]);
     if (item['tipo'] == 'like') return false;
     final vacanteId = item['id'] as int?;
     if (vacanteId == null) return false;
 
-    item['tipo'] = 'like'; item['le_dio_like'] = true;
+    item['tipo'] = 'like';
+    item['le_dio_like'] = true;
     item['timestamp'] = DateTime.now().toIso8601String();
     _historial[historialIndex] = item;
     notifyListeners();
@@ -280,8 +339,10 @@ class StudentProvider extends ChangeNotifier {
     if (historialIndex < 0 || historialIndex >= _historial.length) return;
     final item = Map<String, dynamic>.from(_historial[historialIndex]);
     if (item['tipo'] != 'like' || item['match'] == true) return;
-    item['tipo'] = 'dislike'; item['le_dio_like'] = false;
-    item['match'] = false; item['timestamp'] = DateTime.now().toIso8601String();
+    item['tipo'] = 'dislike';
+    item['le_dio_like'] = false;
+    item['match'] = false;
+    item['timestamp'] = DateTime.now().toIso8601String();
     _historial[historialIndex] = item;
     notifyListeners();
   }
@@ -289,10 +350,17 @@ class StudentProvider extends ChangeNotifier {
   void resetDailySwipes() { _dailySwipes = 0; notifyListeners(); }
 
   void limpiar() {
-    _vacantes = []; _historial.clear();
-    _matchesSesion.clear(); _matchesServidor.clear();
+    _vacantes = [];
+    _historial.clear();
+    _matchesSesion.clear();
+    _matchesServidor.clear();
     _vacanteIdsVistas.clear();
-    _currentIndex = 0; _dailySwipes = 0;
+    _currentIndex = 0;
+    _dailySwipes  = 0;
+    _estudianteId = null;
+    _filtroModalidad = null;
+    _filtroUbicacion = null;
+    _filtroSueldoMin = null;
     notifyListeners();
   }
 }
