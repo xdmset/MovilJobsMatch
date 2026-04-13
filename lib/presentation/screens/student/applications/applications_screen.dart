@@ -1,7 +1,15 @@
 // lib/presentation/screens/student/applications/applications_screen.dart
+//
+// Tab Matches: vacantes donde AMBOS (estudiante + empresa) dieron like
+// Tab Descartadas: vacantes donde el ESTUDIANTE dio like pero la EMPRESA pasó
+//                 → se detecta porque están en historial con le_dio_like=true
+//                   pero NO aparecen en matches del servidor.
+// La IA de feedback requiere Premium y usa la API de Anthropic.
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
@@ -38,6 +46,25 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     }
   }
 
+  // FIX: "Descartadas por empresa" = vacantes donde el estudiante dio like
+  // pero que NO tienen match con ninguna empresa todavía.
+  // Estas son las postulaciones que la empresa vio y pasó (sin match aún).
+  List<Map<String, dynamic>> _getDescartadasPorEmpresa(StudentProvider p) {
+    final matchIds = p.matches.map((m) {
+      final vacante = m['vacante'] as Map<String, dynamic>?;
+      return vacante?['id'] as int? ?? m['vacante_id'] as int?;
+    }).whereType<int>().toSet();
+
+    return p.historial.where((h) {
+      final leDioLike = h['le_dio_like'] as bool? ?? false;
+      final tipo      = h['tipo'] as String? ?? '';
+      final esMatch   = h['match'] as bool? ?? false;
+      final id        = h['id'] as int?;
+      // Estudiante dio like + NO hay match → empresa no hizo match (la ignoró)
+      return (leDioLike || tipo == 'like') && !esMatch && !matchIds.contains(id);
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -48,7 +75,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Mis postulaciones'),
             if (totalMatches > 0)
-              Text('$totalMatches match${totalMatches == 1 ? '' : 'es'} activo${totalMatches == 1 ? '' : 's'}',
+              Text('$totalMatches match${totalMatches == 1 ? '' : 'es'}',
                   style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.accentGreen, fontWeight: FontWeight.w600)),
           ]);
@@ -68,14 +95,12 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
               ]),
             )),
             Consumer<StudentProvider>(builder: (_, p, __) {
-              final descartados = p.historial
-                  .where((h) => h['le_dio_like'] == false && h['tipo'] != 'like')
-                  .length;
+              final count = _getDescartadasPorEmpresa(p).length;
               return Tab(
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.cancel_outlined, size: 16),
+                  const Icon(Icons.hourglass_empty_outlined, size: 16),
                   const SizedBox(width: 6),
-                  Text('Descartados ($descartados)'),
+                  Text('Sin respuesta ($count)'),
                 ]),
               );
             }),
@@ -86,9 +111,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
         if (p.cargandoHistorial && p.historial.isEmpty)
           return const Center(child: CircularProgressIndicator());
 
-        final descartados = p.historial
-            .where((h) => h['le_dio_like'] == false && h['tipo'] != 'like')
-            .toList();
+        final descartadas = _getDescartadasPorEmpresa(p);
 
         return RefreshIndicator(
           onRefresh: _recargar,
@@ -96,7 +119,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
             controller: _tabs,
             children: [
               _buildMatchesTab(context, p.matches, p),
-              _buildDescartadosTab(context, descartados, p),
+              _buildDescartadasTab(context, descartadas, p),
             ],
           ),
         );
@@ -112,7 +135,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     if (matches.isEmpty) {
       return _buildEmpty(
         '¡Aún no tienes matches!',
-        'Cuando una empresa también te elija, aparecerán aquí con todos los detalles del puesto.',
+        'Cuando una empresa también te elija, aparecerán aquí.',
         Icons.favorite_border,
       );
     }
@@ -125,23 +148,29 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
 
   Widget _buildMatchCard(BuildContext context, Map<String, dynamic> match) {
     final vacante     = match['vacante'] as Map<String, dynamic>? ?? {};
-    final titulo      = vacante['titulo']        as String? ?? 'Vacante';
-    final descripcion = vacante['descripcion']   as String? ?? '';
-    final requisitos  = vacante['requisitos']    as String? ?? '';
-    final modalidad   = vacante['modalidad']     as String? ?? '';
-    final ubicacion   = vacante['ubicacion']     as String? ?? '';
-    final contrato    = vacante['tipo_contrato'] as String? ?? '';
+    final titulo      = vacante['titulo']         as String? ?? 'Vacante';
+    final descripcion = vacante['descripcion']    as String? ?? '';
+    final requisitos  = vacante['requisitos']     as String? ?? '';
+    final modalidad   = vacante['modalidad']      as String? ?? '';
+    final ubicacion   = vacante['ubicacion']      as String? ?? '';
+    final contrato    = vacante['tipo_contrato']  as String? ?? '';
     final minS        = vacante['sueldo_minimo'];
     final maxS        = vacante['sueldo_maximo'];
-    final moneda      = vacante['moneda']        as String? ?? 'MXN';
-    final sector      = vacante['sector']        as String?
-                     ?? vacante['tipo_empresa']  as String? ?? '';
-    final fechaMatch  = match['fecha_match']     as String?
-                     ?? vacante['timestamp']     as String? ?? '';
+    final moneda      = vacante['moneda']         as String? ?? 'MXN';
+    final fechaMatch  = match['fecha_match']      as String?
+                     ?? vacante['timestamp']      as String? ?? '';
+    // Datos de empresa (inyectados por el repo)
+    final empNombre   = vacante['empresa_nombre'] as String?
+                     ?? match['empresa_nombre']   as String? ?? 'Empresa';
+    final empFotoUrl  = vacante['empresa_foto_url'] as String?
+                     ?? match['empresa_foto_url']   as String?;
+    final empSector   = vacante['empresa_sector'] as String?
+                     ?? match['empresa_sector']   as String?;
 
     String salario = '';
-    if (minS != null && maxS != null) salario = '\$$minS – \$$maxS $moneda';
-    else if (minS != null)            salario = 'Desde \$$minS $moneda';
+    if (minS != null && maxS != null)
+      salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
+    else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -155,9 +184,9 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-        // ── Header match ────────────────────────────────────────────────
+        // ── Banner match ─────────────────────────────────────────────────
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
             gradient: LinearGradient(colors: [
               AppColors.accentGreen.withOpacity(0.15),
@@ -168,7 +197,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
           child: Row(children: [
             const Icon(Icons.favorite, size: 16, color: AppColors.accentGreen),
             const SizedBox(width: 8),
-            Text('¡Match!', style: AppTextStyles.subtitle1.copyWith(
+            Text('¡Match! 🎉', style: AppTextStyles.subtitle1.copyWith(
                 color: AppColors.accentGreen, fontWeight: FontWeight.bold)),
             const Spacer(),
             if (fechaMatch.isNotEmpty)
@@ -181,23 +210,28 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-            // ── Logo + título empresa ──────────────────────────────────
+            // ── Logo + empresa + puesto ───────────────────────────────────
             Row(children: [
               Container(
-                width: 52, height: 52,
+                width: 54, height: 54,
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
-                  gradient: AppColors.purpleGradient,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(Icons.business, color: Colors.white, size: 26),
+                  color: AppColors.primaryPurple.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(14)),
+                child: empFotoUrl != null
+                    ? Image.network(empFotoUrl, fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _logoFallback(empNombre))
+                    : _logoFallback(empNombre),
               ),
               const SizedBox(width: 12),
               Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(empNombre, style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.primaryPurple, fontWeight: FontWeight.w700)),
                 Text(titulo, style: AppTextStyles.h4.copyWith(
                     fontWeight: FontWeight.bold)),
-                if (sector.isNotEmpty)
-                  Text(sector, style: AppTextStyles.bodySmall.copyWith(
+                if (empSector != null && empSector.isNotEmpty)
+                  Text(empSector, style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.textSecondary)),
               ])),
             ]),
@@ -209,40 +243,45 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                   _lModal(modalidad), AppColors.primaryPurple),
               if (ubicacion.isNotEmpty) _chip(Icons.location_on_outlined,
                   ubicacion, AppColors.accentBlue),
-              if (salario.isNotEmpty) _chip(Icons.attach_money,
+              if (salario.isNotEmpty) _chip(Icons.payments_outlined,
                   salario, AppColors.accentGreen),
               if (contrato.isNotEmpty) _chip(Icons.badge_outlined,
-                  contrato, AppColors.textSecondary),
+                  contrato, AppColors.accentOrange),
             ]),
 
-            // ── Descripción preview ────────────────────────────────────
             if (descripcion.isNotEmpty) ...[
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               const Divider(),
-              const SizedBox(height: 10),
-              Text(descripcion,
-                  maxLines: 3, overflow: TextOverflow.ellipsis,
+              const SizedBox(height: 8),
+              Text(descripcion, maxLines: 3, overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.bodyMedium.copyWith(
                       color: AppColors.textSecondary, height: 1.5)),
             ],
 
-            // ── Requisitos preview ─────────────────────────────────────
-            if (requisitos.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Row(children: [
-                const Icon(Icons.checklist_outlined, size: 14,
-                    color: AppColors.textTertiary),
-                const SizedBox(width: 4),
-                Expanded(child: Text(requisitos,
-                    maxLines: 2, overflow: TextOverflow.ellipsis,
-                    style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textTertiary))),
-              ]),
-            ],
-
             const SizedBox(height: 14),
 
-            // ── Botón ver más ─────────────────────────────────────────
+            // ── Bloque "¿qué sigue?" ───────────────────────────────────
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.accentGreen.withOpacity(0.07),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.accentGreen.withOpacity(0.25)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.tips_and_updates_outlined,
+                    color: AppColors.accentGreen, size: 16),
+                const SizedBox(width: 8),
+                Expanded(child: Text(
+                  'La empresa revisó tu perfil y te eligió. '
+                  'Mantén tu CV actualizado para que puedan contactarte.',
+                  style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textSecondary, height: 1.5),
+                )),
+              ]),
+            ),
+            const SizedBox(height: 12),
+
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -266,20 +305,24 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
 
   void _showMatchDetails(BuildContext context, Map<String, dynamic> match) {
     final vacante     = match['vacante'] as Map<String, dynamic>? ?? {};
-    final titulo      = vacante['titulo']        as String? ?? 'Vacante';
-    final descripcion = vacante['descripcion']   as String? ?? '';
-    final requisitos  = vacante['requisitos']    as String? ?? '';
-    final modalidad   = vacante['modalidad']     as String? ?? '';
-    final ubicacion   = vacante['ubicacion']     as String? ?? '';
-    final contrato    = vacante['tipo_contrato'] as String? ?? '';
+    final titulo      = vacante['titulo']         as String? ?? 'Vacante';
+    final descripcion = vacante['descripcion']    as String? ?? '';
+    final requisitos  = vacante['requisitos']     as String? ?? '';
+    final modalidad   = vacante['modalidad']      as String? ?? '';
+    final ubicacion   = vacante['ubicacion']      as String? ?? '';
+    final contrato    = vacante['tipo_contrato']  as String? ?? '';
     final minS        = vacante['sueldo_minimo'];
     final maxS        = vacante['sueldo_maximo'];
-    final moneda      = vacante['moneda']        as String? ?? 'MXN';
-    final sector      = vacante['sector']        as String?
-                     ?? vacante['tipo_empresa']  as String? ?? '';
+    final moneda      = vacante['moneda']         as String? ?? 'MXN';
+    final empNombre   = vacante['empresa_nombre'] as String?
+                     ?? match['empresa_nombre']   as String? ?? 'Empresa';
+    final empFotoUrl  = vacante['empresa_foto_url'] as String?;
+    final empDesc     = vacante['empresa_descripcion'] as String?;
+
     String salario = '';
-    if (minS != null && maxS != null) salario = '\$$minS – \$$maxS $moneda';
-    else if (minS != null)            salario = 'Desde \$$minS $moneda';
+    if (minS != null && maxS != null)
+      salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
+    else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda';
 
     showModalBottomSheet(
       context: context, backgroundColor: Colors.transparent,
@@ -291,36 +334,34 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
             color: Theme.of(context).cardColor,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
           child: Column(children: [
-            // Handle
             Container(margin: const EdgeInsets.only(top: 12), width: 40, height: 4,
                 decoration: BoxDecoration(color: AppColors.borderLight,
                     borderRadius: BorderRadius.circular(2))),
-            // Header
             Container(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
               child: Row(children: [
-                Container(
-                  width: 56, height: 56,
+                Container(width: 56, height: 56, clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
-                      gradient: AppColors.purpleGradient,
+                      color: AppColors.primaryPurple.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(16)),
-                  child: const Icon(Icons.business, color: Colors.white, size: 28),
+                  child: empFotoUrl != null
+                      ? Image.network(empFotoUrl, fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => _logoFallback(empNombre))
+                      : _logoFallback(empNombre),
                 ),
                 const SizedBox(width: 14),
                 Expanded(child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(empNombre, style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.primaryPurple, fontWeight: FontWeight.w700)),
                   Text(titulo, style: AppTextStyles.h4.copyWith(
                       fontWeight: FontWeight.bold)),
-                  if (sector.isNotEmpty)
-                    Text(sector, style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textSecondary)),
                   const SizedBox(height: 4),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: AppColors.accentGreen.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                      borderRadius: BorderRadius.circular(8)),
                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.favorite, size: 11, color: AppColors.accentGreen),
                       SizedBox(width: 4),
@@ -337,20 +378,24 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
               controller: ctrl,
               padding: const EdgeInsets.all(20),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
-                // Info chips
                 Wrap(spacing: 8, runSpacing: 8, children: [
                   if (modalidad.isNotEmpty) _chip(Icons.work_outline,
                       _lModal(modalidad), AppColors.primaryPurple),
                   if (ubicacion.isNotEmpty) _chip(Icons.location_on_outlined,
                       ubicacion, AppColors.accentBlue),
-                  if (salario.isNotEmpty) _chip(Icons.attach_money,
+                  if (salario.isNotEmpty) _chip(Icons.payments_outlined,
                       salario, AppColors.accentGreen),
                   if (contrato.isNotEmpty) _chip(Icons.badge_outlined,
-                      contrato, AppColors.textSecondary),
+                      contrato, AppColors.accentOrange),
                 ]),
                 const SizedBox(height: 20),
-
+                if (empDesc != null && empDesc.isNotEmpty) ...[
+                  _sectionTitle('Sobre la empresa'),
+                  const SizedBox(height: 8),
+                  Text(empDesc, style: AppTextStyles.bodyMedium.copyWith(
+                      color: AppColors.textSecondary, height: 1.6)),
+                  const SizedBox(height: 18),
+                ],
                 if (descripcion.isNotEmpty) ...[
                   _sectionTitle('Descripción del puesto'),
                   const SizedBox(height: 8),
@@ -365,21 +410,16 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                       color: AppColors.textSecondary, height: 1.6)),
                   const SizedBox(height: 18),
                 ],
-
-                // ── Siguiente paso ────────────────────────────────────
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: AppColors.accentGreen.withOpacity(0.07),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                        color: AppColors.accentGreen.withOpacity(0.25)),
-                  ),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.accentGreen.withOpacity(0.25))),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     const Row(children: [
                       Icon(Icons.tips_and_updates_outlined,
-                          color: AppColors.accentGreen, size: 18),
+                          color: AppColors.accentGreen, size: 16),
                       SizedBox(width: 8),
                       Text('¿Qué sigue?', style: TextStyle(
                           fontWeight: FontWeight.bold,
@@ -387,12 +427,10 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                     ]),
                     const SizedBox(height: 8),
                     Text(
-                      'La empresa revisó tu perfil y también te eligió. '
-                      'Mantén tu CV actualizado y revisa tu perfil para que '
-                      'la empresa pueda contactarte.',
+                      'La empresa puede contactarte por correo o a través de la plataforma. '
+                      'Asegúrate de tener tu perfil y CV actualizados.',
                       style: AppTextStyles.bodySmall.copyWith(
-                          color: AppColors.textSecondary, height: 1.5),
-                    ),
+                          color: AppColors.textSecondary, height: 1.5)),
                   ]),
                 ),
               ]),
@@ -404,66 +442,72 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // TAB 2: DESCARTADOS (por la empresa) — con retroalimentación IA Premium
+  // TAB 2: SIN RESPUESTA — likes del estudiante sin match aún
+  // Pueden ser vacantes donde la empresa aún no revisó, o las ignoró.
   // ══════════════════════════════════════════════════════════════════════════
-  Widget _buildDescartadosTab(BuildContext context,
-      List<Map<String, dynamic>> descartados, StudentProvider p) {
-    if (descartados.isEmpty) {
+  Widget _buildDescartadasTab(BuildContext context,
+      List<Map<String, dynamic>> lista, StudentProvider p) {
+    if (lista.isEmpty) {
       return _buildEmpty(
-        'Sin vacantes descartadas',
-        'Las vacantes que hayas pasado (swipe izquierdo) aparecerán aquí.',
-        Icons.cancel_outlined,
+        'Sin postulaciones pendientes',
+        'Las vacantes donde diste like pero aún no hay match aparecerán aquí.',
+        Icons.hourglass_empty_outlined,
       );
     }
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      itemCount: descartados.length,
-      itemBuilder: (_, i) => _buildDescartadoCard(context, descartados[i], p),
+      itemCount: lista.length,
+      itemBuilder: (_, i) => _buildPendienteCard(context, lista[i], p),
     );
   }
 
-  Widget _buildDescartadoCard(BuildContext context,
+  Widget _buildPendienteCard(BuildContext context,
       Map<String, dynamic> v, StudentProvider p) {
-    final titulo      = v['titulo']        as String? ?? 'Vacante';
-    final descripcion = v['descripcion']   as String? ?? '';
-    final modalidad   = v['modalidad']     as String? ?? '';
-    final ubicacion   = v['ubicacion']     as String? ?? '';
+    final titulo      = v['titulo']           as String? ?? 'Vacante';
+    final descripcion = v['descripcion']      as String? ?? '';
+    final modalidad   = v['modalidad']        as String? ?? '';
+    final ubicacion   = v['ubicacion']        as String? ?? '';
     final minS        = v['sueldo_minimo'];
     final maxS        = v['sueldo_maximo'];
-    final moneda      = v['moneda']        as String? ?? 'MXN';
-    final ts          = v['timestamp']     as String? ?? '';
-    final sector      = v['sector']        as String?
-                     ?? v['tipo_empresa']  as String? ?? '';
-    String salario = '';
-    if (minS != null && maxS != null) salario = '\$$minS – \$$maxS $moneda';
-    else if (minS != null)            salario = 'Desde \$$minS $moneda';
+    final moneda      = v['moneda']           as String? ?? 'MXN';
+    final ts          = v['timestamp']        as String? ?? '';
+    final empNombre   = v['empresa_nombre']   as String? ?? 'Empresa';
+    final empFotoUrl  = v['empresa_foto_url'] as String?;
+    final empSector   = v['empresa_sector']   as String?;
 
-    final auth = context.read<AuthProvider>();
-    final esPremium = auth.usuario?.esPremium ?? false;
+    final auth       = context.read<AuthProvider>();
+    final esPremium  = auth.usuario?.esPremium ?? false;
+
+    String salario = '';
+    if (minS != null && maxS != null)
+      salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
+    else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda';
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.borderLight),
         boxShadow: [BoxShadow(
             color: Colors.black.withOpacity(0.04), blurRadius: 8)],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-        // Header
+        // Header: estado de espera
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: AppColors.error.withOpacity(0.06),
+            color: AppColors.accentOrange.withOpacity(0.08),
             borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
           ),
           child: Row(children: [
-            const Icon(Icons.cancel_outlined, size: 14, color: AppColors.error),
+            const Icon(Icons.hourglass_top_outlined,
+                size: 14, color: AppColors.accentOrange),
             const SizedBox(width: 6),
-            Text('Descartaste esta vacante',
+            Text('Esperando respuesta de la empresa',
                 style: AppTextStyles.bodySmall.copyWith(
-                    color: AppColors.error, fontWeight: FontWeight.w600)),
+                    color: AppColors.accentOrange, fontWeight: FontWeight.w600)),
             const Spacer(),
             if (ts.isNotEmpty)
               Text(_formatFecha(ts), style: AppTextStyles.bodySmall.copyWith(
@@ -475,34 +519,39 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
           padding: const EdgeInsets.all(14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-            // Logo + título
+            // Logo + empresa + puesto
             Row(children: [
-              Container(width: 44, height: 44,
+              Container(
+                width: 48, height: 48, clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
-                    color: AppColors.textTertiary.withOpacity(0.1),
+                    color: AppColors.primaryPurple.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(12)),
-                child: const Icon(Icons.business_outlined,
-                    color: AppColors.textSecondary, size: 22)),
+                child: empFotoUrl != null
+                    ? Image.network(empFotoUrl, fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _logoFallback(empNombre))
+                    : _logoFallback(empNombre),
+              ),
               const SizedBox(width: 10),
               Expanded(child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(empNombre, style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.primaryPurple, fontWeight: FontWeight.w700)),
                 Text(titulo, style: AppTextStyles.subtitle1.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary)),
-                if (sector.isNotEmpty)
-                  Text(sector, style: AppTextStyles.bodySmall.copyWith(
+                    fontWeight: FontWeight.w600)),
+                if (empSector != null && empSector.isNotEmpty)
+                  Text(empSector, style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.textTertiary)),
               ])),
             ]),
             const SizedBox(height: 10),
 
             Wrap(spacing: 6, runSpacing: 4, children: [
-              if (modalidad.isNotEmpty) _chipMini(_lModal(modalidad),
-                  AppColors.textSecondary),
-              if (ubicacion.isNotEmpty) _chipMini(ubicacion,
-                  AppColors.textSecondary),
-              if (salario.isNotEmpty) _chipMini(salario,
-                  AppColors.textSecondary),
+              if (modalidad.isNotEmpty)
+                _chipMini(_lModal(modalidad), AppColors.primaryPurple),
+              if (ubicacion.isNotEmpty)
+                _chipMini(ubicacion, AppColors.accentBlue),
+              if (salario.isNotEmpty)
+                _chipMini(salario, AppColors.accentGreen),
             ]),
 
             if (descripcion.isNotEmpty) ...[
@@ -514,7 +563,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
 
             const SizedBox(height: 12),
 
-            // ── Botón IA feedback (solo premium) ─────────────────────
+            // ── Botón IA feedback Premium ────────────────────────────────
             if (esPremium)
               SizedBox(
                 width: double.infinity,
@@ -522,7 +571,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                   onPressed: () => _showAIFeedback(context, v),
                   icon: const Icon(Icons.auto_awesome, size: 15,
                       color: AppColors.primaryPurple),
-                  label: const Text('¿Por qué no encajé? (IA)',
+                  label: const Text('Análisis IA de tu postulación',
                       style: TextStyle(color: AppColors.primaryPurple)),
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: AppColors.primaryPurple),
@@ -533,39 +582,42 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                 ),
               )
             else
-              // Teaser premium
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [
-                    AppColors.primaryPurple.withOpacity(0.08),
-                    AppColors.accentBlue.withOpacity(0.06),
-                  ]),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: AppColors.primaryPurple.withOpacity(0.2)),
-                ),
-                child: Row(children: [
-                  const Icon(Icons.lock_outline, size: 16,
-                      color: AppColors.primaryPurple),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(
-                    'Con Premium la IA te explica por qué no encajaste y cómo mejorar tu CV',
-                    style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.primaryPurple),
-                  )),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () => Navigator.of(context)
-                        .pushNamed(AppRoutes.studentPremium),
-                    style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4)),
-                    child: const Text('Ver', style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.primaryPurple)),
+              // Teaser premium conectado a la pantalla de paypal
+              GestureDetector(
+                onTap: () => context.push(AppRoutes.studentPremium),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(colors: [
+                      AppColors.primaryPurple.withOpacity(0.08),
+                      AppColors.accentBlue.withOpacity(0.06),
+                    ]),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: AppColors.primaryPurple.withOpacity(0.2)),
                   ),
-                ]),
+                  child: Row(children: [
+                    const Icon(Icons.lock_outline, size: 16,
+                        color: AppColors.primaryPurple),
+                    const SizedBox(width: 8),
+                    const Expanded(child: Text(
+                      'Con Premium la IA analiza tu postulación y te da consejos personalizados',
+                      style: TextStyle(fontSize: 12,
+                          color: AppColors.primaryPurple),
+                    )),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryPurple,
+                        borderRadius: BorderRadius.circular(8)),
+                      child: const Text('Ver planes',
+                          style: TextStyle(color: Colors.white,
+                              fontWeight: FontWeight.bold, fontSize: 11)),
+                    ),
+                  ]),
+                ),
               ),
           ]),
         ),
@@ -573,7 +625,6 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     );
   }
 
-  // ── Modal con IA feedback para descartado ─────────────────────────────────
   void _showAIFeedback(BuildContext context, Map<String, dynamic> vacante) {
     showModalBottomSheet(
       context: context, backgroundColor: Colors.transparent,
@@ -585,32 +636,42 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
   // ── Helpers ───────────────────────────────────────────────────────────────
   Widget _buildEmpty(String title, String sub, IconData icon) =>
     ListView(children: [
-      SizedBox(height: 420, child: Center(child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppColors.textTertiary.withOpacity(0.08),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 56, color: AppColors.textTertiary)),
-          const SizedBox(height: 20),
-          Text(title, style: AppTextStyles.h4.copyWith(
-              color: AppColors.textSecondary), textAlign: TextAlign.center),
-          const SizedBox(height: 8),
-          Text(sub, style: AppTextStyles.bodyMedium.copyWith(
-              color: AppColors.textTertiary), textAlign: TextAlign.center),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-              onPressed: _recargar,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Actualizar')),
-        ]),
-      ))),
+      SizedBox(
+        height: 420,
+        child: Center(child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppColors.textTertiary.withOpacity(0.08),
+                shape: BoxShape.circle),
+              child: Icon(icon, size: 56, color: AppColors.textTertiary)),
+            const SizedBox(height: 20),
+            Text(title, style: AppTextStyles.h4.copyWith(
+                color: AppColors.textSecondary), textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(sub, style: AppTextStyles.bodyMedium.copyWith(
+                color: AppColors.textTertiary), textAlign: TextAlign.center),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+                onPressed: _recargar,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Actualizar')),
+          ]),
+        )),
+      ),
     ]);
 
   Widget _sectionTitle(String t) => Text(t,
       style: AppTextStyles.subtitle1.copyWith(fontWeight: FontWeight.bold));
+
+  Widget _logoFallback(String nombre) {
+    final ini = nombre.trim().split(' ').where((w) => w.isNotEmpty)
+        .take(2).map((w) => w[0].toUpperCase()).join();
+    return Center(child: Text(ini, style: TextStyle(
+        color: AppColors.primaryPurple, fontWeight: FontWeight.bold,
+        fontSize: ini.length == 1 ? 20 : 15)));
+  }
 
   Widget _chip(IconData icon, String label, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -630,6 +691,12 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     child: Text(label, style: TextStyle(fontSize: 11, color: color,
         fontWeight: FontWeight.w600)),
   );
+
+  String _fmt(dynamic n) {
+    final d = double.tryParse(n.toString()) ?? 0;
+    return d.truncate().toString().replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
+  }
 
   String _formatFecha(String ts) {
     try {
@@ -651,8 +718,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// WIDGET DE RETROALIMENTACIÓN IA (Premium)
-// Llama a la API de Claude para analizar por qué el estudiante no encajó
+// WIDGET DE RETROALIMENTACIÓN IA — conectado a la API de Anthropic
 // ══════════════════════════════════════════════════════════════════════════════
 class _AIFeedbackSheet extends StatefulWidget {
   final Map<String, dynamic> vacante;
@@ -666,79 +732,90 @@ class _AIFeedbackSheetState extends State<_AIFeedbackSheet> {
   String _feedback = '';
   String? _error;
 
+  // API key desde --dart-define=ANTHROPIC_API_KEY=...
+  static const _apiKey = String.fromEnvironment('ANTHROPIC_API_KEY');
+
   @override
-  void initState() {
-    super.initState();
-    _generarFeedback();
-  }
+  void initState() { super.initState(); _generarFeedback(); }
 
   Future<void> _generarFeedback() async {
     setState(() { _cargando = true; _error = null; });
     try {
-      final v          = widget.vacante;
-      final titulo     = v['titulo']      as String? ?? 'la vacante';
-      final desc       = v['descripcion'] as String? ?? '';
-      final requi      = v['requisitos']  as String? ?? '';
-      final modalidad  = v['modalidad']   as String? ?? '';
-      final contrato   = v['tipo_contrato'] as String? ?? '';
+      final v         = widget.vacante;
+      final titulo    = v['titulo']           as String? ?? 'la vacante';
+      final desc      = v['descripcion']      as String? ?? '';
+      final requi     = v['requisitos']       as String? ?? '';
+      final modalidad = v['modalidad']        as String? ?? '';
+      final contrato  = v['tipo_contrato']    as String? ?? '';
+      final empNombre = v['empresa_nombre']   as String? ?? '';
+      final empSector = v['empresa_sector']   as String? ?? '';
+      final empDesc   = v['empresa_descripcion'] as String? ?? '';
 
-      // Obtener perfil del estudiante desde el provider si está disponible
-      // Para el prompt usamos los datos de la vacante que tenemos
       final prompt = '''
-Eres un coach de carrera profesional y experto en reclutamiento laboral.
-Un estudiante descartó (swipe izquierdo) una vacante y quiere saber:
-1. Qué podría mejorar en su perfil/CV para este tipo de puesto
-2. Si debería reconsiderar la vacante
-3. Consejos concretos y accionables
+Eres un coach de carrera experto en reclutamiento laboral para jóvenes estudiantes mexicanos.
+Un estudiante postuló a esta vacante pero aún no ha recibido respuesta de la empresa.
 
-Datos de la vacante descartada:
+Datos de la vacante:
 - Puesto: $titulo
+- Empresa: $empNombre${empSector.isNotEmpty ? ' ($empSector)' : ''}
 - Modalidad: $modalidad
-- Tipo de contrato: $contrato
-- Descripción: $desc
-- Requisitos: $requi
+- Contrato: $contrato
+${empDesc.isNotEmpty ? '- Sobre la empresa: $empDesc' : ''}
+${desc.isNotEmpty ? '- Descripción: $desc' : ''}
+${requi.isNotEmpty ? '- Requisitos: $requi' : ''}
 
-Responde en español, de forma amigable y motivadora. Máximo 3 secciones cortas:
-1. 🎯 Por qué podría ser una buena oportunidad
-2. 💡 Qué mejorar en tu perfil para este tipo de puesto  
-3. ✅ Próximos pasos concretos
+Responde en español, de forma amigable, motivadora y concreta. Usa exactamente 3 secciones:
 
-Sé específico basándote en los requisitos de la vacante. Responde directamente sin preámbulos.
+🎯 Por qué esta oportunidad vale la pena
+(2-3 oraciones sobre el valor de esta vacante/empresa)
+
+💡 Cómo destacar tu perfil para este puesto
+(3-4 consejos accionables específicos para esta vacante)
+
+✅ Próximos pasos concretos
+(2-3 acciones que puede hacer ahora mismo)
+
+Sé específico. No uses frases genéricas. Máximo 250 palabras en total.
 ''';
 
-      final response = await _callClaude(prompt);
-      if (mounted) setState(() { _feedback = response; _cargando = false; });
+      final text = await _callClaude(prompt);
+      if (mounted) setState(() { _feedback = text; _cargando = false; });
     } catch (e) {
       if (mounted) setState(() {
-        _error = 'No se pudo generar el análisis. Intenta de nuevo.';
+        _error = 'No se pudo generar el análisis. Verifica tu conexión.';
         _cargando = false;
       });
     }
   }
 
   Future<String> _callClaude(String prompt) async {
-    // Llamada a la API de Anthropic
-    final uri = Uri.parse('https://api.anthropic.com/v1/messages');
-    final http = await _httpPost(uri, jsonEncode({
-      'model': 'claude-sonnet-4-20250514',
-      'max_tokens': 1000,
-      'messages': [{'role': 'user', 'content': prompt}],
-    }));
-    final data = jsonDecode(http);
+    if (_apiKey.isEmpty) {
+      throw Exception('ANTHROPIC_API_KEY no configurada. '
+          'Ejecuta con --dart-define=ANTHROPIC_API_KEY=sk-ant-...');
+    }
+
+    final response = await http.post(
+      Uri.parse('https://api.anthropic.com/v1/messages'),
+      headers: {
+        'Content-Type':       'application/json',
+        'x-api-key':          _apiKey,
+        'anthropic-version':  '2023-06-01',
+      },
+      body: jsonEncode({
+        'model':      'claude-sonnet-4-20250514',
+        'max_tokens': 1000,
+        'messages':   [{'role': 'user', 'content': prompt}],
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('API error ${response.statusCode}: ${response.body}');
+    }
+
+    final data    = jsonDecode(response.body) as Map<String, dynamic>;
     final content = data['content'] as List?;
     if (content == null || content.isEmpty) throw Exception('Sin respuesta');
     return (content.first as Map)['text'] as String? ?? '';
-  }
-
-  // HTTP helper sin dependencias externas
-  Future<String> _httpPost(Uri uri, String body) async {
-    // Usamos HttpClient de dart:io a través de http package
-    // En producción ya tienes dio configurado — adaptar según tu api_service
-    throw UnimplementedError(
-      'Conectar _callClaude con tu ApiService o http package. '
-      'El endpoint es POST https://api.anthropic.com/v1/messages '
-      'con el body ya formateado correctamente.'
-    );
   }
 
   @override
@@ -750,11 +827,9 @@ Sé específico basándote en los requisitos de la vacante. Responde directament
           color: Theme.of(context).cardColor,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
         child: Column(children: [
-          // Handle
           Container(margin: const EdgeInsets.only(top: 12), width: 40, height: 4,
               decoration: BoxDecoration(color: AppColors.borderLight,
                   borderRadius: BorderRadius.circular(2))),
-          // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
             child: Row(children: [
@@ -762,32 +837,30 @@ Sé específico basándote en los requisitos de la vacante. Responde directament
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   gradient: AppColors.purpleGradient,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.auto_awesome,
-                    color: Colors.white, size: 18),
+                  borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.auto_awesome, color: Colors.white, size: 18),
               ),
               const SizedBox(width: 10),
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Análisis IA', style: AppTextStyles.subtitle1.copyWith(
                     fontWeight: FontWeight.bold)),
-                Text('Basado en la vacante descartada',
+                Text(widget.vacante['titulo'] as String? ?? 'Vacante',
                     style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textTertiary)),
-              ]),
-              const Spacer(),
+                        color: AppColors.textTertiary),
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+              ])),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: AppColors.primaryPurple.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                  borderRadius: BorderRadius.circular(8)),
                 child: const Row(mainAxisSize: MainAxisSize.min, children: [
                   Icon(Icons.workspace_premium, size: 12,
                       color: AppColors.primaryPurple),
                   SizedBox(width: 4),
-                  Text('Premium', style: TextStyle(
-                      fontSize: 11, color: AppColors.primaryPurple,
+                  Text('Premium', style: TextStyle(fontSize: 11,
+                      color: AppColors.primaryPurple,
                       fontWeight: FontWeight.bold)),
                 ]),
               ),
@@ -799,18 +872,15 @@ Sé específico basándote en los requisitos de la vacante. Responde directament
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    gradient: AppColors.purpleGradient,
-                    shape: BoxShape.circle,
-                  ),
+                    gradient: AppColors.purpleGradient, shape: BoxShape.circle),
                   child: const Icon(Icons.auto_awesome,
-                      color: Colors.white, size: 32),
-                ),
+                      color: Colors.white, size: 32)),
                 const SizedBox(height: 20),
-                Text('Analizando la vacante...',
+                Text('Analizando tu postulación...',
                     style: AppTextStyles.subtitle1.copyWith(
                         color: AppColors.textSecondary)),
                 const SizedBox(height: 8),
-                Text('La IA está preparando tu retroalimentación',
+                Text('La IA está preparando tu feedback',
                     style: AppTextStyles.bodySmall.copyWith(
                         color: AppColors.textTertiary)),
                 const SizedBox(height: 24),
@@ -832,26 +902,24 @@ Sé específico basándote en los requisitos de la vacante. Responde directament
                         onPressed: _generarFeedback,
                         icon: const Icon(Icons.refresh),
                         label: const Text('Reintentar')),
-                  ]),
-                ))
+                  ])))
               : SingleChildScrollView(
                   controller: ctrl,
                   padding: const EdgeInsets.all(20),
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    // Nombre vacante
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: AppColors.primaryPurple.withOpacity(0.07),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                        borderRadius: BorderRadius.circular(12)),
                       child: Row(children: [
-                        const Icon(Icons.work_outline, size: 16,
+                        const Icon(Icons.business_outlined, size: 16,
                             color: AppColors.primaryPurple),
                         const SizedBox(width: 8),
                         Expanded(child: Text(
-                          widget.vacante['titulo'] as String? ?? 'Vacante',
+                          '${widget.vacante['empresa_nombre'] ?? ''} · '
+                          '${widget.vacante['titulo'] ?? 'Vacante'}',
                           style: AppTextStyles.bodyMedium.copyWith(
                               color: AppColors.primaryPurple,
                               fontWeight: FontWeight.w600),
@@ -859,11 +927,9 @@ Sé específico basándote en los requisitos de la vacante. Responde directament
                       ]),
                     ),
                     const SizedBox(height: 16),
-                    // Feedback de la IA
                     Text(_feedback, style: AppTextStyles.bodyMedium.copyWith(
                         color: AppColors.textSecondary, height: 1.7)),
                     const SizedBox(height: 24),
-                    // Botón regenerar
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
@@ -875,8 +941,7 @@ Sé específico basándote en los requisitos de la vacante. Responde directament
                         style: OutlinedButton.styleFrom(
                           side: const BorderSide(color: AppColors.primaryPurple),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
+                              borderRadius: BorderRadius.circular(12))),
                       ),
                     ),
                   ]),

@@ -36,7 +36,9 @@ class StudentHomeScreen extends StatelessWidget {
         actions: [
           Consumer<StudentProvider>(builder: (_, p, __) {
             final activo = p.filtroModalidad != null ||
-                p.filtroUbicacion != null || p.filtroSueldoMin != null;
+                p.filtroUbicacion != null || p.filtroSueldoMin != null ||
+                p.filtroBusqueda != null || p.filtroContrato != null ||
+                p.filtroEmpresa != null;
             return Stack(children: [
               IconButton(
                 icon: Icon(activo ? Icons.tune : Icons.tune_outlined),
@@ -72,8 +74,8 @@ class StudentHomeScreen extends StatelessWidget {
       body: Consumer<StudentProvider>(builder: (context, p, _) {
         if (p.cargandoVacantes && p.vacantes.isEmpty)
           return const Center(child: CircularProgressIndicator());
-        if (p.vacantes.isEmpty)      return _buildEmpty(context, p);
-        if (p.hasReachedLimit)       return _buildLimitReached(context);
+        if (p.hasReachedLimit) return _buildLimitReached(context);
+        if (p.vacantes.isEmpty) return _buildEmpty(context, p);
         if (p.currentVacancy == null) return _buildAllSeen(context, p);
         return _buildSwipeStack(context, p);
       }),
@@ -117,17 +119,21 @@ class StudentHomeScreen extends StatelessWidget {
       title: const Text('Cerrar sesión'),
       content: const Text('¿Seguro que quieres cerrar sesión?'),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar')),
-        ElevatedButton(
-          onPressed: () {
-            context.read<StudentProvider>().limpiar();
-            context.read<AuthProvider>().logout();
-            Navigator.pop(context);
-            context.go(AppRoutes.welcome);
-          },
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-          child: const Text('Salir'),
+        SizedBox(width: double.infinity,
+          child: OutlinedButton(onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'))),
+        const SizedBox(height: 8),
+        SizedBox(width: double.infinity,
+          child: ElevatedButton(
+            onPressed: () {
+              context.read<StudentProvider>().limpiar();
+              context.read<AuthProvider>().logout();
+              Navigator.pop(context);
+              context.go(AppRoutes.welcome);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Salir'),
+          ),
         ),
       ],
     ));
@@ -138,6 +144,7 @@ class StudentHomeScreen extends StatelessWidget {
     final userId = context.read<AuthProvider>().usuario?.id ?? 0;
 
     return Column(children: [
+      _buildSwipeProgress(p),
       Expanded(child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         child: _SwipeCard(
@@ -159,6 +166,31 @@ class StudentHomeScreen extends StatelessWidget {
     ]);
   }
 
+  Widget _buildSwipeProgress(StudentProvider p) {
+    final pct = (p.remainingSwipes / p.maxSwipes).clamp(0.0, 1.0);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Row(children: [
+        Expanded(child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: pct,
+            backgroundColor: AppColors.borderLight,
+            valueColor: AlwaysStoppedAnimation(
+                pct > 0.4 ? AppColors.accentGreen
+                : pct > 0.2 ? AppColors.accentOrange
+                : AppColors.error),
+            minHeight: 4,
+          ),
+        )),
+        const SizedBox(width: 8),
+        Text('${p.remainingSwipes}/${p.maxSwipes}',
+            style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textTertiary, fontSize: 11)),
+      ]),
+    );
+  }
+
   Future<void> _onLike(BuildContext context, StudentProvider p,
       int userId, Map<String, dynamic> v) async {
     final esMatch = await p.likeVacancy(userId);
@@ -174,15 +206,14 @@ class StudentHomeScreen extends StatelessWidget {
           Text('¡Es un Match! 🎉',
               style: AppTextStyles.h3.copyWith(color: AppColors.accentGreen)),
           const SizedBox(height: 8),
-          Text('"${v['titulo'] ?? 'Esta empresa'}" también te eligió.',
+          Text('"${v['empresa_nombre'] ?? v['titulo'] ?? 'Esta empresa'}" también te eligió.',
               style: AppTextStyles.bodyMedium.copyWith(
                   color: AppColors.textSecondary), textAlign: TextAlign.center),
         ]),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context),
-              child: const Text('Seguir viendo')),
-          ElevatedButton(onPressed: () => Navigator.pop(context),
-              child: const Text('¡Genial!')),
+          SizedBox(width: double.infinity,
+              child: ElevatedButton(onPressed: () => Navigator.pop(context),
+                  child: const Text('¡Genial!'))),
         ],
       ));
     } else {
@@ -213,259 +244,351 @@ class StudentHomeScreen extends StatelessWidget {
       ),
     );
 
-  // ── Estados vacíos ────────────────────────────────────────────────────────
+  // ── Estados vacíos — FIX: Column con mainAxisSize.min para no amontonar ──
   Widget _buildEmpty(BuildContext context, StudentProvider p) => Center(
-    child: Padding(padding: const EdgeInsets.all(32), child: Column(
-      mainAxisAlignment: MainAxisAlignment.center, children: [
-      Icon(Icons.work_off_outlined, size: 80, color: AppColors.textTertiary),
-      const SizedBox(height: 16),
-      Text('Sin vacantes disponibles', style: AppTextStyles.h4.copyWith(
-          color: AppColors.textSecondary)),
-      const SizedBox(height: 8),
-      Text('Vuelve más tarde o quita los filtros activos',
-          style: AppTextStyles.bodyMedium.copyWith(
-              color: AppColors.textTertiary), textAlign: TextAlign.center),
-      const SizedBox(height: 24),
-      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-        ElevatedButton.icon(onPressed: () => p.cargarVacantes(),
-            icon: const Icon(Icons.refresh), label: const Text('Recargar')),
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.work_off_outlined, size: 72, color: AppColors.textTertiary),
+        const SizedBox(height: 16),
+        Text('Sin vacantes disponibles', style: AppTextStyles.h4.copyWith(
+            color: AppColors.textSecondary), textAlign: TextAlign.center),
+        const SizedBox(height: 8),
+        Text('Ajusta los filtros o vuelve más tarde para ver nuevas oportunidades.',
+            style: AppTextStyles.bodyMedium.copyWith(
+                color: AppColors.textTertiary), textAlign: TextAlign.center),
+        const SizedBox(height: 24),
+        SizedBox(width: double.infinity,
+          child: ElevatedButton.icon(onPressed: () => p.cargarVacantes(),
+              icon: const Icon(Icons.refresh), label: const Text('Recargar'))),
         if (p.filtroModalidad != null || p.filtroUbicacion != null ||
-            p.filtroSueldoMin != null) ...[
-          const SizedBox(width: 12),
-          OutlinedButton(onPressed: () => p.limpiarFiltros(),
-              child: const Text('Quitar filtros')),
+            p.filtroSueldoMin != null || p.filtroBusqueda != null ||
+            p.filtroContrato != null || p.filtroEmpresa != null) ...[
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity,
+            child: OutlinedButton(onPressed: () => p.limpiarFiltros(),
+                child: const Text('Quitar todos los filtros'))),
         ],
       ]),
-    ])),
+    ),
   );
 
   Widget _buildLimitReached(BuildContext context) => Center(
-    child: Padding(padding: const EdgeInsets.all(32), child: Column(
-      mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(gradient: AppColors.purpleGradient,
-              shape: BoxShape.circle),
-          child: const Icon(Icons.lock_outline, size: 60, color: Colors.white)),
-      const SizedBox(height: 24),
-      Text('Límite diario alcanzado', style: AppTextStyles.h3,
-          textAlign: TextAlign.center),
-      const SizedBox(height: 12),
-      Text('Mejora a Premium para tener swipes ilimitados cada día.',
-          style: AppTextStyles.bodyLarge.copyWith(
-              color: AppColors.textSecondary), textAlign: TextAlign.center),
-      const SizedBox(height: 32),
-      ElevatedButton.icon(onPressed: () => context.push(AppRoutes.studentPremium),
-          icon: const Icon(Icons.star), label: const Text('Mejorar a Premium')),
-    ])),
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(gradient: AppColors.purpleGradient,
+                shape: BoxShape.circle),
+            child: const Icon(Icons.lock_outline, size: 60, color: Colors.white)),
+        const SizedBox(height: 24),
+        Text('Límite diario alcanzado', style: AppTextStyles.h3,
+            textAlign: TextAlign.center),
+        const SizedBox(height: 12),
+        Text('Vuelve mañana para seguir explorando, o mejora a Premium para swipes ilimitados.',
+            style: AppTextStyles.bodyLarge.copyWith(
+                color: AppColors.textSecondary), textAlign: TextAlign.center),
+        const SizedBox(height: 16),
+        // Countdown hasta medianoche
+        const _CountdownTimer(),
+        const SizedBox(height: 24),
+        SizedBox(width: double.infinity,
+          child: ElevatedButton.icon(
+              onPressed: () => context.push(AppRoutes.studentPremium),
+              icon: const Icon(Icons.star),
+              label: const Text('Mejorar a Premium'))),
+      ]),
+    ),
   );
 
   Widget _buildAllSeen(BuildContext context, StudentProvider p) => Center(
-    child: Padding(padding: const EdgeInsets.all(32), child: Column(
-      mainAxisAlignment: MainAxisAlignment.center, children: [
-      Icon(Icons.check_circle_outline, size: 80, color: AppColors.accentGreen),
-      const SizedBox(height: 16),
-      Text('¡Revisaste todas las vacantes disponibles!',
-          style: AppTextStyles.h4.copyWith(color: AppColors.textSecondary),
-          textAlign: TextAlign.center),
-      const SizedBox(height: 8),
-      Text('Vuelve mañana para ver nuevas oportunidades',
-          style: AppTextStyles.bodyMedium.copyWith(
-              color: AppColors.textTertiary), textAlign: TextAlign.center),
-      const SizedBox(height: 24),
-      ElevatedButton.icon(
-          onPressed: () => p.cargarVacantes(resetIndex: true),
-          icon: const Icon(Icons.refresh),
-          label: const Text('Buscar de nuevo')),
-    ])),
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.check_circle_outline, size: 72, color: AppColors.accentGreen),
+        const SizedBox(height: 16),
+        Text('¡Revisaste todas las vacantes!',
+            style: AppTextStyles.h4.copyWith(color: AppColors.textSecondary),
+            textAlign: TextAlign.center),
+        const SizedBox(height: 8),
+        Text('Vuelve mañana para ver nuevas oportunidades.',
+            style: AppTextStyles.bodyMedium.copyWith(
+                color: AppColors.textTertiary), textAlign: TextAlign.center),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+            onPressed: () => p.cargarVacantes(resetIndex: true),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Buscar de nuevo')),
+      ]),
+    ),
   );
 
-  // ── Filtros ───────────────────────────────────────────────────────────────
+  // ── Filtros mejorados ─────────────────────────────────────────────────────
   void _showFilters(BuildContext context) {
     final p = context.read<StudentProvider>();
-    // Por defecto sin filtro de modalidad (muestra todas)
     String? modalidadTemp = p.filtroModalidad;
     String? ubicacionTemp = p.filtroUbicacion;
     double? sueldoTemp    = p.filtroSueldoMin;
-    final ubicCtrl  = TextEditingController(text: p.filtroUbicacion ?? '');
-    final sueldoCtrl = TextEditingController(
+    String? busquedaTemp  = p.filtroBusqueda;
+    String? contratoTemp  = p.filtroContrato;
+    String? empresaTemp   = p.filtroEmpresa;
+
+    final ubicCtrl     = TextEditingController(text: p.filtroUbicacion ?? '');
+    final sueldoCtrl   = TextEditingController(
         text: p.filtroSueldoMin?.toStringAsFixed(0) ?? '');
+    final busquedaCtrl = TextEditingController(text: p.filtroBusqueda ?? '');
+    final empresaCtrl  = TextEditingController(text: p.filtroEmpresa ?? '');
 
     showModalBottomSheet(
       context: context, backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => StatefulBuilder(builder: (ctx, setModal) => Container(
-        height: MediaQuery.of(context).size.height * 0.75,
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
-        child: Column(children: [
-          Container(margin: const EdgeInsets.only(top: 12),
-              width: 40, height: 4,
-              decoration: BoxDecoration(color: AppColors.borderLight,
-                  borderRadius: BorderRadius.circular(2))),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Filtrar vacantes', style: AppTextStyles.h4),
-                TextButton(
-                  onPressed: () => setModal(() {
-                    modalidadTemp = null; ubicacionTemp = null;
-                    sueldoTemp = null; ubicCtrl.clear(); sueldoCtrl.clear();
-                  }),
-                  child: const Text('Limpiar todo'),
-                ),
-              ],
+      builder: (_) => StatefulBuilder(builder: (ctx, setModal) {
+        InputDecoration inputDeco(String hint, IconData icon, TextEditingController ctrl,
+            void Function() onClear) => InputDecoration(
+          hintText: hint,
+          prefixIcon: Icon(icon, color: AppColors.primaryPurple),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.primaryPurple, width: 2)),
+          filled: true,
+          fillColor: Theme.of(context).scaffoldBackgroundColor,
+          suffixIcon: ctrl.text.isNotEmpty
+              ? IconButton(icon: const Icon(Icons.close), onPressed: onClear)
+              : null,
+        );
+
+        Widget label(String t) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Text(t, style: AppTextStyles.subtitle1.copyWith(
+              fontWeight: FontWeight.bold)));
+
+        Widget chip(String texto, String valor, String? sel,
+            void Function(String?) cb) {
+          final isS = sel == valor;
+          return FilterChip(
+            label: Text(texto), selected: isS,
+            onSelected: (_) => cb(isS ? null : valor),
+            selectedColor: AppColors.primaryPurple, checkmarkColor: Colors.white,
+            labelStyle: TextStyle(color: isS ? Colors.white : null,
+                fontWeight: FontWeight.w600),
+          );
+        }
+
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.90,
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+          child: Column(children: [
+            Container(margin: const EdgeInsets.only(top: 12),
+                width: 40, height: 4,
+                decoration: BoxDecoration(color: AppColors.borderLight,
+                    borderRadius: BorderRadius.circular(2))),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Filtrar vacantes', style: AppTextStyles.h4),
+                  TextButton(
+                    onPressed: () => setModal(() {
+                      modalidadTemp = null; ubicacionTemp = null;
+                      sueldoTemp = null; busquedaTemp = null;
+                      contratoTemp = null; empresaTemp = null;
+                      ubicCtrl.clear(); sueldoCtrl.clear();
+                      busquedaCtrl.clear(); empresaCtrl.clear();
+                    }),
+                    child: const Text('Limpiar todo'),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const Divider(),
-          Expanded(child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Divider(),
+            Expanded(child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-              // ── Modalidad ─────────────────────────────────────────────
-              Text('Modalidad de trabajo', style: AppTextStyles.subtitle1
-                  .copyWith(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text('Sin selección = muestra todas las modalidades',
-                  style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.textTertiary)),
-              const SizedBox(height: 12),
-              Wrap(spacing: 8, runSpacing: 8, children: [
-                _filterChip('Remoto', 'remoto', modalidadTemp,
-                    Icons.home_work_outlined, (v) =>
-                        setModal(() => modalidadTemp = v)),
-                _filterChip('Presencial', 'presencial', modalidadTemp,
-                    Icons.business_outlined, (v) =>
-                        setModal(() => modalidadTemp = v)),
-                _filterChip('Híbrido', 'hibrido', modalidadTemp,
-                    Icons.sync_alt_outlined, (v) =>
-                        setModal(() => modalidadTemp = v)),
-              ]),
-              const SizedBox(height: 24),
-
-              // ── Ubicación ─────────────────────────────────────────────
-              Text('Ubicación', style: AppTextStyles.subtitle1
-                  .copyWith(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: ubicCtrl,
-                decoration: InputDecoration(
-                  hintText: 'Ej: Tijuana, Ciudad de México',
-                  prefixIcon: const Icon(Icons.location_on_outlined,
-                      color: AppColors.primaryPurple),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                        color: AppColors.primaryPurple, width: 2)),
-                  filled: true,
-                  fillColor: Theme.of(context).scaffoldBackgroundColor,
-                  suffixIcon: ubicCtrl.text.isNotEmpty
-                      ? IconButton(icon: const Icon(Icons.close),
-                          onPressed: () {
-                            ubicCtrl.clear();
-                            setModal(() => ubicacionTemp = null);
-                          }) : null,
+                label('🔍 Buscar por nombre o puesto'),
+                TextField(
+                  controller: busquedaCtrl,
+                  decoration: inputDeco(
+                    'Ej: Desarrollador, Diseñador, Marketing...',
+                    Icons.search, busquedaCtrl,
+                    () { busquedaCtrl.clear(); setModal(() => busquedaTemp = null); }),
+                  onChanged: (v) => setModal(() =>
+                      busquedaTemp = v.trim().isEmpty ? null : v.trim()),
                 ),
-                onChanged: (v) => setModal(() =>
-                    ubicacionTemp = v.trim().isEmpty ? null : v.trim()),
-              ),
-              const SizedBox(height: 24),
+                const SizedBox(height: 22),
 
-              // ── Sueldo mínimo ─────────────────────────────────────────
-              Text('Sueldo mínimo mensual (MXN)', style: AppTextStyles.subtitle1
-                  .copyWith(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: sueldoCtrl,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  hintText: 'Sin límite mínimo',
-                  prefixIcon: const Icon(Icons.attach_money,
-                      color: AppColors.primaryPurple),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                        color: AppColors.primaryPurple, width: 2)),
-                  filled: true,
-                  fillColor: Theme.of(context).scaffoldBackgroundColor,
-                  suffixIcon: sueldoCtrl.text.isNotEmpty
-                      ? IconButton(icon: const Icon(Icons.close),
-                          onPressed: () {
-                            sueldoCtrl.clear();
-                            setModal(() => sueldoTemp = null);
-                          }) : null,
+                label('🏢 Empresa específica'),
+                TextField(
+                  controller: empresaCtrl,
+                  decoration: inputDeco(
+                    'Ej: Google, TechCorp, StartupMX...',
+                    Icons.business_outlined, empresaCtrl,
+                    () { empresaCtrl.clear(); setModal(() => empresaTemp = null); }),
+                  onChanged: (v) => setModal(() =>
+                      empresaTemp = v.trim().isEmpty ? null : v.trim()),
                 ),
-                onChanged: (v) => setModal(() => sueldoTemp = double.tryParse(v)),
-              ),
-              const SizedBox(height: 10),
-              Wrap(spacing: 8, children: [5000.0, 10000.0, 15000.0, 20000.0]
-                  .map((s) {
-                final sel = sueldoTemp == s;
-                return ChoiceChip(
-                  label: Text('\$${s.toStringAsFixed(0)}'),
-                  selected: sel,
-                  onSelected: (_) => setModal(() {
-                    sueldoTemp = sel ? null : s;
-                    sueldoCtrl.text = sel ? '' : s.toStringAsFixed(0);
-                  }),
-                  selectedColor: AppColors.primaryPurple,
-                  labelStyle: TextStyle(
-                      color: sel ? Colors.white : null,
-                      fontWeight: FontWeight.w600),
-                );
-              }).toList()),
-            ]),
-          )),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  p.aplicarFiltros(
-                    modalidad: modalidadTemp,
-                    ubicacion: ubicacionTemp,
-                    sueldoMin: sueldoTemp,
+                const SizedBox(height: 22),
+
+                label('💼 Modalidad de trabajo'),
+                Text('Sin selección = todas las modalidades',
+                    style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textTertiary)),
+                const SizedBox(height: 10),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  chip('🏠 Remoto', 'remoto', modalidadTemp,
+                      (v) => setModal(() => modalidadTemp = v)),
+                  chip('🏢 Presencial', 'presencial', modalidadTemp,
+                      (v) => setModal(() => modalidadTemp = v)),
+                  chip('🔄 Híbrido', 'hibrido', modalidadTemp,
+                      (v) => setModal(() => modalidadTemp = v)),
+                ]),
+                const SizedBox(height: 22),
+
+                label('📋 Tipo de contrato'),
+                const SizedBox(height: 2),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  chip('Tiempo completo', 'tiempo completo', contratoTemp,
+                      (v) => setModal(() => contratoTemp = v)),
+                  chip('Medio tiempo', 'medio tiempo', contratoTemp,
+                      (v) => setModal(() => contratoTemp = v)),
+                  chip('Por proyecto', 'proyecto', contratoTemp,
+                      (v) => setModal(() => contratoTemp = v)),
+                  chip('Prácticas', 'practicas', contratoTemp,
+                      (v) => setModal(() => contratoTemp = v)),
+                  chip('Freelance', 'freelance', contratoTemp,
+                      (v) => setModal(() => contratoTemp = v)),
+                ]),
+                const SizedBox(height: 22),
+
+                label('📍 Ubicación'),
+                TextField(
+                  controller: ubicCtrl,
+                  decoration: inputDeco(
+                    'Ej: Tijuana, Ciudad de México...',
+                    Icons.location_on_outlined, ubicCtrl,
+                    () { ubicCtrl.clear(); setModal(() => ubicacionTemp = null); }),
+                  onChanged: (v) => setModal(() =>
+                      ubicacionTemp = v.trim().isEmpty ? null : v.trim()),
+                ),
+                const SizedBox(height: 22),
+
+                label('💰 Sueldo mínimo mensual (MXN)'),
+                TextField(
+                  controller: sueldoCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: inputDeco(
+                    'Sin límite mínimo',
+                    Icons.attach_money, sueldoCtrl,
+                    () { sueldoCtrl.clear(); setModal(() => sueldoTemp = null); }),
+                  onChanged: (v) => setModal(() => sueldoTemp = double.tryParse(v)),
+                ),
+                const SizedBox(height: 10),
+                Wrap(spacing: 8, runSpacing: 6, children: [
+                  5000.0, 8000.0, 10000.0, 15000.0, 20000.0, 30000.0
+                ].map((s) {
+                  final sel = sueldoTemp == s;
+                  return ChoiceChip(
+                    label: Text('\$${s.toStringAsFixed(0)}'),
+                    selected: sel,
+                    onSelected: (_) => setModal(() {
+                      sueldoTemp = sel ? null : s;
+                      sueldoCtrl.text = sel ? '' : s.toStringAsFixed(0);
+                    }),
+                    selectedColor: AppColors.primaryPurple,
+                    labelStyle: TextStyle(
+                        color: sel ? Colors.white : null,
+                        fontWeight: FontWeight.w600),
                   );
-                },
-                child: Text(modalidadTemp == null && ubicacionTemp == null &&
-                    sueldoTemp == null
-                    ? 'Ver todas las vacantes'
-                    : 'Aplicar filtros'),
+                }).toList()),
+              ]),
+            )),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    p.aplicarFiltros(
+                      modalidad: modalidadTemp,
+                      ubicacion: ubicacionTemp,
+                      sueldoMin: sueldoTemp,
+                      busqueda:  busquedaTemp,
+                      contrato:  contratoTemp,
+                      empresa:   empresaTemp,
+                    );
+                  },
+                  child: Text((modalidadTemp ?? ubicacionTemp ?? sueldoTemp ??
+                      busquedaTemp ?? contratoTemp ?? empresaTemp) != null
+                      ? 'Aplicar filtros'
+                      : 'Ver todas las vacantes'),
+                ),
               ),
             ),
-          ),
-        ]),
-      )),
+          ]),
+        );
+      }),
     );
   }
-
-  Widget _filterChip(String label, String value, String? selected,
-      IconData icon, void Function(String?) onChanged) {
-    final sel = selected == value;
-    return FilterChip(
-      avatar: Icon(icon,
-          size: 16, color: sel ? Colors.white : AppColors.textSecondary),
-      label: Text(label),
-      selected: sel,
-      onSelected: (_) => onChanged(sel ? null : value),
-      selectedColor: AppColors.primaryPurple,
-      checkmarkColor: Colors.white,
-      labelStyle: TextStyle(
-          color: sel ? Colors.white : null, fontWeight: FontWeight.w600),
-    );
-  }
-
 }
 
-// ── Tarjeta con swipe gestural + info de empresa ──────────────────────────────
+// ── Countdown hasta medianoche ────────────────────────────────────────────────
+class _CountdownTimer extends StatefulWidget {
+  const _CountdownTimer();
+  @override
+  State<_CountdownTimer> createState() => _CountdownTimerState();
+}
+
+class _CountdownTimerState extends State<_CountdownTimer> {
+  late Duration _remaining;
+
+  @override
+  void initState() {
+    super.initState();
+    _calcular();
+    _tick();
+  }
+
+  void _calcular() {
+    final now    = DateTime.now();
+    final manana = DateTime(now.year, now.month, now.day + 1);
+    _remaining   = manana.difference(now);
+  }
+
+  void _tick() async {
+    while (mounted) {
+      await Future.delayed(const Duration(minutes: 1));
+      if (!mounted) return;
+      setState(_calcular);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final h = _remaining.inHours;
+    final m = _remaining.inMinutes % 60;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.textTertiary.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.timer_outlined, size: 16, color: AppColors.textTertiary),
+        const SizedBox(width: 8),
+        Text('Nuevo lote de swipes en ${h}h ${m}m',
+            style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
+}
+
+// ── Tarjeta con swipe gestural ────────────────────────────────────────────────
 class _SwipeCard extends StatefulWidget {
   final Map<String, dynamic> vacante;
   final VoidCallback onLike;
@@ -477,8 +600,8 @@ class _SwipeCard extends StatefulWidget {
 }
 
 class _SwipeCardState extends State<_SwipeCard> {
-  Offset _offset    = Offset.zero;
-  bool   _dragging  = false;
+  Offset _offset   = Offset.zero;
+  bool   _dragging = false;
   static const double _threshold = 100.0;
 
   @override
@@ -516,9 +639,7 @@ class _SwipeCardState extends State<_SwipeCard> {
 
   Widget _indicator(String label, Color color, double opacity, bool left) =>
     Positioned(
-      top: 30,
-      left:  left  ? 20 : null,
-      right: !left ? 20 : null,
+      top: 30, left: left ? 20 : null, right: !left ? 20 : null,
       child: Opacity(opacity: opacity, child: Transform.rotate(
         angle: left ? -0.3 : 0.3,
         child: Container(
@@ -533,23 +654,28 @@ class _SwipeCardState extends State<_SwipeCard> {
     );
 
   Widget _buildCard(BuildContext context) {
-    final v          = widget.vacante;
-    final titulo     = v['titulo']       as String? ?? 'Vacante';
-    final modalidad  = v['modalidad']    as String? ?? '';
-    final ubicacion  = v['ubicacion']    as String? ?? '';
-    final desc       = v['descripcion']  as String? ?? '';
-    final requi      = v['requisitos']   as String? ?? '';
-    final contrato   = v['tipo_contrato'] as String? ?? '';
-    final minS       = v['sueldo_minimo'];
-    final maxS       = v['sueldo_maximo'];
-    final moneda     = v['moneda']        as String? ?? 'MXN';
-    // Tipo de empresa — viene del perfil de la empresa embebido si existe
-    final tipoEmpresa = v['tipo_empresa']  as String?
-                     ?? v['sector']        as String?
-                     ?? v['empresa']?['sector'] as String?;
-    String salario   = '';
-    if (minS != null && maxS != null) salario = '\$$minS – \$$maxS $moneda';
-    else if (minS != null)            salario = 'Desde \$$minS $moneda';
+    final v = widget.vacante;
+    final titulo          = v['titulo']             as String? ?? 'Vacante';
+    final modalidad       = v['modalidad']          as String? ?? '';
+    final ubicacion       = v['ubicacion']          as String? ?? '';
+    final desc            = v['descripcion']        as String? ?? '';
+    final requi           = v['requisitos']         as String? ?? '';
+    final contrato        = v['tipo_contrato']      as String? ?? '';
+    final minS            = v['sueldo_minimo'];
+    final maxS            = v['sueldo_maximo'];
+    final moneda          = v['moneda']             as String? ?? 'MXN';
+    final estado          = v['estado']             as String? ?? '';
+    final empresaNombre   = v['empresa_nombre']     as String? ?? 'Empresa';
+    final empresaSector   = v['empresa_sector']     as String?;
+    final empresaFotoUrl  = v['empresa_foto_url']   as String?;
+    final empresaDesc     = v['empresa_descripcion']as String?;
+    final empresaUbic     = v['empresa_ubicacion']  as String?;
+
+    String salario = '';
+    if (minS != null && maxS != null)
+      salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda/mes';
+    else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda/mes';
+    else if (maxS != null) salario = 'Hasta \$${_fmt(maxS)} $moneda/mes';
 
     return Container(
       width: double.infinity,
@@ -562,85 +688,152 @@ class _SwipeCardState extends State<_SwipeCard> {
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // ── Header empresa ──────────────────────────────────────────
-          Row(children: [
-            Container(width: 52, height: 52,
+          // ── Header empresa ──────────────────────────────────────────────
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 60, height: 60,
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                color: AppColors.primaryPurple.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(14)),
-              child: const Icon(Icons.business, color: AppColors.primaryPurple)),
-            const SizedBox(width: 12),
+                color: AppColors.primaryPurple.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                    color: AppColors.primaryPurple.withOpacity(0.15))),
+              child: empresaFotoUrl != null
+                  ? Image.network(empresaFotoUrl, fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _logoFallback(empresaNombre))
+                  : _logoFallback(empresaNombre),
+            ),
+            const SizedBox(width: 14),
             Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start, children: [
+                crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(empresaNombre, style: AppTextStyles.bodyMedium.copyWith(
+                  color: AppColors.primaryPurple, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 2),
               Text(titulo, style: AppTextStyles.h4.copyWith(
-                  fontWeight: FontWeight.bold)),
-              if (tipoEmpresa != null && tipoEmpresa.isNotEmpty)
-                Text('Empresa · $tipoEmpresa',
-                    style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textSecondary)),
+                  fontWeight: FontWeight.bold, height: 1.2)),
+              if (empresaSector != null && empresaSector.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Row(children: [
+                  const Icon(Icons.category_outlined, size: 12,
+                      color: AppColors.textTertiary),
+                  const SizedBox(width: 4),
+                  Text(empresaSector, style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textTertiary)),
+                ]),
+              ],
             ])),
+            if (estado == 'activa')
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                    color: AppColors.accentGreen.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20)),
+                child: Text('Activa', style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.accentGreen,
+                    fontWeight: FontWeight.w700, fontSize: 10)),
+              ),
           ]),
+
           const SizedBox(height: 16),
+          const Divider(height: 1),
+          const SizedBox(height: 14),
 
-          // ── Info chips con etiquetas ─────────────────────────────────
-          if (modalidad.isNotEmpty) _infoRow(
-              Icons.work_outline, 'Modalidad', _lModal(modalidad),
-              AppColors.primaryPurple),
-          if (ubicacion.isNotEmpty) _infoRow(
-              Icons.location_on_outlined, 'Ubicación', ubicacion,
-              AppColors.accentBlue),
-          if (salario.isNotEmpty) _infoRow(
-              Icons.attach_money, 'Sueldo', salario,
-              AppColors.accentGreen),
-          if (contrato.isNotEmpty) _infoRow(
-              Icons.badge_outlined, 'Contrato', contrato,
-              AppColors.accentBlue),
+          // ── Info ──────────────────────────────────────────────────────────
+          if (modalidad.isNotEmpty)
+            _row(Icons.work_outline, 'Modalidad', _lModal(modalidad),
+                AppColors.primaryPurple),
+          if (ubicacion.isNotEmpty)
+            _row(Icons.location_on_outlined, 'Ubicación', ubicacion,
+                AppColors.accentBlue),
+          if (empresaUbic != null && empresaUbic.isNotEmpty &&
+              empresaUbic != ubicacion)
+            _row(Icons.apartment_outlined, 'Sede', empresaUbic,
+                AppColors.accentBlue),
+          if (salario.isNotEmpty)
+            _row(Icons.payments_outlined, 'Sueldo', salario,
+                AppColors.accentGreen),
+          if (contrato.isNotEmpty)
+            _row(Icons.badge_outlined, 'Contrato', contrato,
+                AppColors.accentOrange),
 
-          // ── Descripción ──────────────────────────────────────────────
-          if (desc.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            const Divider(),
+          // ── Sobre empresa ─────────────────────────────────────────────────
+          if (empresaDesc != null && empresaDesc.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Divider(height: 1),
             const SizedBox(height: 12),
-            Text('Descripción del puesto',
-                style: AppTextStyles.subtitle1.copyWith(
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
+            _seccion(Icons.business_outlined, 'Sobre la empresa'),
+            const SizedBox(height: 6),
+            Text(empresaDesc, style: AppTextStyles.bodyMedium.copyWith(
+                color: AppColors.textSecondary, height: 1.6),
+                maxLines: 4, overflow: TextOverflow.ellipsis),
+          ],
+
+          // ── Descripción ───────────────────────────────────────────────────
+          if (desc.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            _seccion(Icons.description_outlined, 'Descripción del puesto'),
+            const SizedBox(height: 6),
             Text(desc, style: AppTextStyles.bodyMedium.copyWith(
                 color: AppColors.textSecondary, height: 1.6)),
           ],
+
+          // ── Requisitos ────────────────────────────────────────────────────
           if (requi.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Text('Requisitos', style: AppTextStyles.subtitle1.copyWith(
-                fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
+            _seccion(Icons.checklist_outlined, 'Requisitos'),
+            const SizedBox(height: 6),
             Text(requi, style: AppTextStyles.bodyMedium.copyWith(
                 color: AppColors.textSecondary, height: 1.6)),
           ],
+
           const SizedBox(height: 80),
         ]),
       ),
     );
   }
 
-  Widget _infoRow(IconData icon, String label, String value, Color color) =>
-    Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(children: [
-        Icon(icon, size: 15, color: color),
-        const SizedBox(width: 6),
+  Widget _logoFallback(String nombre) {
+    final ini = nombre.trim().split(' ').where((w) => w.isNotEmpty)
+        .take(2).map((w) => w[0].toUpperCase()).join();
+    return Center(child: Text(ini, style: TextStyle(
+        color: AppColors.primaryPurple, fontWeight: FontWeight.bold,
+        fontSize: ini.length == 1 ? 22 : 18)));
+  }
+
+  String _fmt(dynamic n) {
+    final d = double.tryParse(n.toString()) ?? 0;
+    return d.truncate().toString().replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
+  }
+
+  Widget _row(IconData icon, String label, String val, Color color) =>
+    Padding(padding: const EdgeInsets.only(bottom: 10),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 15, color: color)),
+        const SizedBox(width: 8),
         Text('$label: ', style: AppTextStyles.bodySmall.copyWith(
             color: AppColors.textSecondary, fontWeight: FontWeight.w500)),
-        Flexible(child: Text(value, style: AppTextStyles.bodySmall.copyWith(
+        Flexible(child: Text(val, style: AppTextStyles.bodySmall.copyWith(
             color: color, fontWeight: FontWeight.w700))),
-      ]),
-    );
+      ]));
+
+  Widget _seccion(IconData icon, String label) =>
+    Row(children: [
+      Icon(icon, size: 14, color: AppColors.primaryPurple),
+      const SizedBox(width: 6),
+      Text(label, style: AppTextStyles.subtitle1.copyWith(
+          fontWeight: FontWeight.bold)),
+    ]);
 
   String _lModal(String m) {
     switch (m) {
-      case 'remoto': return 'Remoto (desde casa)';
-      case 'presencial': return 'Presencial (en oficina)';
-      case 'hibrido': return 'Híbrido (mixto)';
-      default: return m.isNotEmpty ? m : 'No especificado';
+      case 'remoto':     return '🏠 Remoto (desde casa)';
+      case 'presencial': return '🏢 Presencial (en oficina)';
+      case 'hibrido':    return '🔄 Híbrido (mixto)';
+      default:           return m.isNotEmpty ? m : 'No especificado';
     }
   }
 }
