@@ -12,11 +12,14 @@ import '../../providers/auth_provider.dart';
 enum _TipoAcceso { estudiante, empresa }
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String? tipoInicial; // 'estudiante' o 'empresa'
+  const LoginScreen({super.key, this.tipoInicial});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
+
+
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey   = GlobalKey<FormState>();
@@ -33,6 +36,14 @@ class _LoginScreenState extends State<LoginScreen> {
     _passCtrl.dispose();
     super.dispose();
   }
+  
+  @override
+void initState() {
+  super.initState();
+  if (widget.tipoInicial == 'empresa') {
+    _tipoAcceso = _TipoAcceso.empresa;
+  }
+}
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
