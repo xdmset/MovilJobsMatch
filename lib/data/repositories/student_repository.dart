@@ -21,10 +21,25 @@ class StudentRepository {
   // Cache de perfiles de empresa para no repetir llamadas
   final Map<int, Map<String, dynamic>> _empresaCache = {};
 
-  // ── Feed de vacantes (NO vistas aún) ─────────────────────────────────────
-  Future<List<Map<String, dynamic>>> getVacantesFeed(int estudianteId) async {
+  // ── Feed de vacantes (NO vistas aún), con filtros opcionales de backend ──────
+  Future<List<Map<String, dynamic>>> getVacantesFeed(
+    int estudianteId, {
+    String? modalidad,
+    String? ubicacion,
+    double? sueldoMin,
+  }) async {
     try {
-      final raw = await _api.get('/swipes/$estudianteId/vacantes', auth: true);
+      final query = <String, String>{
+        'skip': '0', 'limit': '100',
+        if (modalidad != null && modalidad.isNotEmpty) 'modalidad': modalidad,
+        if (ubicacion != null && ubicacion.isNotEmpty) 'ubicacion': ubicacion,
+        if (sueldoMin != null) 'sueldo_min': sueldoMin.toString(),
+      };
+      final raw = await _api.get(
+        '/swipes/$estudianteId/vacantes',
+        query: query,
+        auth: true,
+      );
       final lista = raw is List ? raw : (raw['data'] as List? ?? []);
       debugPrint('[StudentRepo] feed: ${lista.length} vacantes');
       final vacantes = lista.cast<Map<String, dynamic>>();
@@ -32,7 +47,7 @@ class StudentRepository {
       return await _enriquecerConEmpresa(vacantes);
     } catch (e) {
       debugPrint('[StudentRepo] getVacantesFeed error: $e');
-      return getVacantes();
+      return [];
     }
   }
 
