@@ -57,7 +57,9 @@ class WelcomeScreen extends StatelessWidget {
                 titulo: 'Soy estudiante o egresado',
                 descripcion: 'Busca prácticas y empleos que se adapten a tu perfil',
                 color: AppColors.primaryPurple,
-                onLogin: () => context.push(AppRoutes.login),
+                // onLogin: () => context.push(AppRoutes.login),
+                // Después — sección estudiante:
+                onLogin: () => context.push(AppRoutes.login, extra: 'estudiante'),
                 onRegister: () => context.push(AppRoutes.registerStudent),
               ),
               const SizedBox(height: 16),
@@ -68,7 +70,8 @@ class WelcomeScreen extends StatelessWidget {
                 titulo: 'Soy empresa reclutadora',
                 descripcion: 'Publica vacantes y encuentra al candidato ideal',
                 color: AppColors.accentBlue,
-                onLogin: () => context.push(AppRoutes.login),
+                // Después — sección empresa:
+                onLogin: () => context.push(AppRoutes.login, extra: 'empresa'),
                 onRegister: () => context.push(AppRoutes.registerCompany),
               ),
 

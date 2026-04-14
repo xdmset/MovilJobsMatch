@@ -55,8 +55,13 @@ class AppRouter {
           key: state.pageKey, child: const WelcomeScreen(),
           transitionsBuilder: (_, a, __, c) => FadeTransition(opacity: a, child: c)),
       ),
-      GoRoute(path: AppRoutes.login,
-          builder: (_, __) => const LoginScreen()),
+      GoRoute(
+        path: AppRoutes.login,
+        builder: (context, state) => LoginScreen(
+          tipoInicial: state.extra as String?,
+        ),
+      ),
+
       GoRoute(path: AppRoutes.registerStudent,
           builder: (_, __) => const RegisterStudentScreen()),
       GoRoute(path: AppRoutes.registerCompany,
