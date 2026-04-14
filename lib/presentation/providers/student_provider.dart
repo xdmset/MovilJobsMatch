@@ -1,5 +1,6 @@
 // lib/presentation/providers/student_provider.dart
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/repositories/student_repository.dart';
@@ -84,13 +85,20 @@ class StudentProvider extends ChangeNotifier {
       final serverItems = await _repo.getHistorialEstudiante(estudianteId);
       debugPrint('[StudentProvider] historial: ${serverItems.length} items');
 
-      // Reconstruir el set completo de IDs vistos
+      // Preservar IDs locales de sesión ANTES de limpiar
+      // (son los swipes que ya registramos en esta sesión pero el servidor
+      //  aún no los tiene en el historial porque /view puede tardar o fallar)
+      final idsLocalesSesion = Set<int>.from(_vacanteIdsVistas);
+
+      // Reconstruir el set completo de IDs vistos desde el servidor
       _vacanteIdsVistas.clear();
       for (final v in serverItems) {
         final id = v['id'] as int?;
         if (id != null) _vacanteIdsVistas.add(id);
       }
-      // También incluir lo procesado localmente en esta sesión
+      // Re-agregar los IDs locales (unión servidor + sesión)
+      _vacanteIdsVistas.addAll(idsLocalesSesion);
+      // También incluir cualquier item del historial local no cubierto
       for (final h in _historial) {
         final id = h['id'] as int?;
         if (id != null) _vacanteIdsVistas.add(id);
@@ -98,17 +106,35 @@ class StudentProvider extends ChangeNotifier {
 
       debugPrint('[StudentProvider] _vacanteIdsVistas: ${_vacanteIdsVistas.length} IDs');
 
+      // IDs con match real del servidor (cargados previamente en cargarMatches)
+      final matchVacanteIds = _matchesServidor
+          .map((m) => m['vacante_id'] as int?)
+          .whereType<int>()
+          .toSet();
+
       final deServidor = serverItems.map((v) {
         final leDioLike = v['le_dio_like'] as bool? ?? false;
+        final vacanteId = v['id'] as int?;
+        final tieneMatch = vacanteId != null &&
+            matchVacanteIds.contains(vacanteId);
         final ts = leDioLike
             ? (v['fecha_like'] as String? ?? v['ultima_visualizacion'] as String? ?? '')
             : (v['ultima_visualizacion'] as String? ?? '');
+
+        // Preservar estado_postulacion y feedback si vienen del servidor
         return <String, dynamic>{
           ...v,
-          'tipo':        leDioLike ? 'like' : 'dislike',
-          'timestamp':   ts,
-          'match':       false,
-          'le_dio_like': leDioLike,
+          'tipo':               leDioLike ? 'like' : 'dislike',
+          'timestamp':          ts,
+          'match':              tieneMatch,
+          'le_dio_like':        leDioLike,
+          // Preservar campos de postulación si existen
+          if (v['estado_postulacion'] != null)
+            'estado_postulacion': v['estado_postulacion'],
+          if (v['feedback'] != null) 'feedback': v['feedback'],
+          if (v['campos_mejora'] != null) 'campos_mejora': v['campos_mejora'],
+          if (v['sugerencias_perfil'] != null)
+            'sugerencias_perfil': v['sugerencias_perfil'],
         };
       }).toList();
 
@@ -242,6 +268,15 @@ class StudentProvider extends ChangeNotifier {
       _currentIndex = 0;
       debugPrint('[StudentProvider] vacantes disponibles tras dedup: ${lista.length} '
           '(vistas: ${_vacanteIdsVistas.length})');
+
+      // Registrar vista de la primera tarjeta del feed para que aparezca
+      // en el historial del backend desde el primer momento
+      if (lista.isNotEmpty) {
+        final primerIdVacante = lista.first['id'] as int?;
+        if (primerIdVacante != null) {
+          unawaited(_repo.registrarVista(primerIdVacante));
+        }
+      }
     } catch (e) {
       debugPrint('[StudentProvider] cargarVacantes error: $e');
       _vacantes = [];
@@ -342,12 +377,20 @@ class StudentProvider extends ChangeNotifier {
 
     bool esMatch = false;
     if (vacanteId != null) {
+      // Registrar vista en el historial del backend (necesario para que
+      // aparezca en /vacante/historial/estudiante/{id})
+      unawaited(_repo.registrarVista(vacanteId));
       final matchRes = await _repo.registrarSwipe(estudianteId, vacanteId, true);
       if (matchRes != null) {
         esMatch = true;
         _matchesSesion.insert(0, {...matchRes, 'vacante': v});
       }
     }
+
+    // Registrar vista de la SIGUIENTE tarjeta si existe
+    final nextVacancy = currentVacancy;
+    final nextId = nextVacancy?['id'] as int?;
+    if (nextId != null) unawaited(_repo.registrarVista(nextId));
 
     final localItem = <String, dynamic>{
       ...v,
@@ -370,7 +413,11 @@ class StudentProvider extends ChangeNotifier {
     final v         = currentVacancy!;
     final vacanteId = v['id'] as int?;
 
-    if (vacanteId != null) _vacanteIdsVistas.add(vacanteId);
+    if (vacanteId != null) {
+      _vacanteIdsVistas.add(vacanteId);
+      // Registrar vista en el historial del backend
+      unawaited(_repo.registrarVista(vacanteId));
+    }
 
     final localItem = <String, dynamic>{
       ...v,
@@ -388,8 +435,12 @@ class StudentProvider extends ChangeNotifier {
     await _guardarSwipesDiarios();
     notifyListeners();
 
+    // Registrar vista de la SIGUIENTE tarjeta si existe
+    final nextId = currentVacancy?['id'] as int?;
+    if (nextId != null) unawaited(_repo.registrarVista(nextId));
+
     if (vacanteId != null) {
-      await _repo.registrarSwipe(estudianteId, vacanteId, false);
+      unawaited(_repo.registrarSwipe(estudianteId, vacanteId, false));
     }
   }
 

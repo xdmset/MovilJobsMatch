@@ -20,101 +20,174 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    // 5 tabs: Todo / ❤️ Likes / ✕ Pasé / 🎉 Matches / ✗ Rechazados
+    _tabController = TabController(length: 5, vsync: this);
   }
 
   @override
-  void dispose() { _tabController.dispose(); super.dispose(); }
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
 
   Future<void> _refresh() async {
     final userId = context.read<AuthProvider>().usuario?.id;
-    if (userId != null) await context.read<StudentProvider>().cargarHistorial(userId);
+    if (userId == null) return;
+    final p = context.read<StudentProvider>();
+    await p.cargarHistorial(userId);
+    await p.cargarMatches(userId);
+  }
+
+  // ── Helpers para clasificar items ─────────────────────────────────────────
+
+  /// Un item es "match" si tiene match:true O su id aparece en matches del servidor
+  bool _esMatch(Map<String, dynamic> item, StudentProvider p) {
+    if (item['match'] == true) return true;
+    final vacanteId = item['id'] as int?;
+    if (vacanteId == null) return false;
+    return p.matches.any((m) => m['vacante_id'] == vacanteId);
+  }
+
+  /// Un item fue "rechazado por la empresa" si hay una postulación con
+  /// estado == 'rechazada'. El campo viene del historial enriquecido.
+  bool _esRechazado(Map<String, dynamic> item) {
+    final estado = item['estado_postulacion'] as String? ?? '';
+    return estado == 'rechazada';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: Consumer<StudentProvider>(builder: (_, p, __) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Actividad'),
-            Text('${p.historial.length} vacantes revisadas',
-                style: AppTextStyles.bodySmall.copyWith(
-                    color: AppColors.textTertiary)),
+    return Consumer<StudentProvider>(builder: (context, p, _) {
+      // Clasificar listas
+      final todo      = List<Map<String, dynamic>>.from(p.historial);
+      final likes     = todo.where((h) => (h['tipo'] == 'like') && !_esMatch(h, p) && !_esRechazado(h)).toList();
+      final dislikes  = todo.where((h) => h['tipo'] == 'dislike').toList();
+      final matches   = todo.where((h) => _esMatch(h, p)).toList();
+      final rechazados = todo.where((h) => _esRechazado(h)).toList();
+
+      return Scaffold(
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Actividad'),
+              Text('${todo.length} vacantes revisadas',
+                  style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textTertiary)),
+            ],
+          ),
+          actions: [
+            IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: _refresh,
+                tooltip: 'Actualizar'),
           ],
-        )),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh),
-              onPressed: _refresh, tooltip: 'Actualizar'),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: [
-            Consumer<StudentProvider>(builder: (_, p, __) =>
-                Tab(text: 'Todo (${p.historial.length})')),
-            Consumer<StudentProvider>(builder: (_, p, __) {
-              final likes = p.historial.where((h) => h['tipo'] == 'like').length;
-              return Tab(text: '❤️ Gustaron ($likes)');
-            }),
-            Consumer<StudentProvider>(builder: (_, p, __) {
-              final dislikes = p.historial.where((h) => h['tipo'] == 'dislike').length;
-              return Tab(text: '✕ Pasé ($dislikes)');
-            }),
-          ],
+          bottom: TabBar(
+            controller: _tabController,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            tabs: [
+              Tab(text: 'Todo (${todo.length})'),
+              Tab(text: '❤️ Likes (${likes.length})'),
+              Tab(text: '✕ Pasé (${dislikes.length})'),
+              _buildMatchTab(matches.length),
+              _buildRechazadoTab(rechazados.length),
+            ],
+          ),
         ),
-      ),
-      body: Consumer<StudentProvider>(
-        builder: (_, p, __) {
-          if (p.cargandoHistorial && p.historial.isEmpty)
-            return const Center(child: CircularProgressIndicator());
-
-          final todo     = List<Map<String, dynamic>>.from(p.historial);
-          final likes    = todo.where((h) => h['tipo'] == 'like').toList();
-          final dislikes = todo.where((h) => h['tipo'] == 'dislike').toList();
-
-          return RefreshIndicator(
-            onRefresh: _refresh,
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildLista(context, todo, p),
-                _buildLista(context, likes, p),
-                _buildLista(context, dislikes, p),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+        body: p.cargandoHistorial && todo.isEmpty
+            ? const Center(child: CircularProgressIndicator())
+            : RefreshIndicator(
+                onRefresh: _refresh,
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildLista(context, todo,      p),
+                    _buildLista(context, likes,     p),
+                    _buildLista(context, dislikes,  p),
+                    _buildLista(context, matches,   p, emptyMsg: 'Aún no tienes matches',
+                        emptyDesc: 'Cuando una empresa también te dé like, aparecerá aquí 🎉'),
+                    _buildLista(context, rechazados, p, emptyMsg: 'Sin rechazos',
+                        emptyDesc: 'Las postulaciones rechazadas por la empresa aparecerán aquí'),
+                  ],
+                ),
+              ),
+      );
+    });
   }
 
+  Widget _buildMatchTab(int count) => Tab(
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      const Text('🎉 Matches'),
+      if (count > 0) ...[
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            color: AppColors.accentGreen,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text('$count',
+              style: const TextStyle(color: Colors.white, fontSize: 11,
+                  fontWeight: FontWeight.bold)),
+        ),
+      ],
+    ]),
+  );
+
+  Widget _buildRechazadoTab(int count) => Tab(
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      const Text('✗ Rechazados'),
+      if (count > 0) ...[
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            color: AppColors.error,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text('$count',
+              style: const TextStyle(color: Colors.white, fontSize: 11,
+                  fontWeight: FontWeight.bold)),
+        ),
+      ],
+    ]),
+  );
+
+  // ── Lista con agrupación por fecha ────────────────────────────────────────
   Widget _buildLista(BuildContext context,
-      List<Map<String, dynamic>> lista, StudentProvider p) {
+      List<Map<String, dynamic>> lista, StudentProvider p, {
+        String emptyMsg  = 'Sin actividad aún',
+        String emptyDesc = 'Explora vacantes para ver tu historial aquí',
+      }) {
     if (lista.isEmpty) {
       return ListView(children: [
-        SizedBox(height: 420, child: Center(child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppColors.textTertiary.withOpacity(0.08),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.history, size: 52,
-                  color: AppColors.textTertiary)),
-            const SizedBox(height: 20),
-            Text('Sin actividad aún', style: AppTextStyles.h4.copyWith(
-                color: AppColors.textSecondary)),
-            const SizedBox(height: 8),
-            Text('Explora vacantes para ver tu historial aquí',
-                style: AppTextStyles.bodyMedium.copyWith(
+        SizedBox(
+          height: 420,
+          child: Center(child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: AppColors.textTertiary.withOpacity(0.08),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.history, size: 52,
                     color: AppColors.textTertiary),
-                textAlign: TextAlign.center),
-          ]),
-        ))),
+              ),
+              const SizedBox(height: 20),
+              Text(emptyMsg, style: AppTextStyles.h4.copyWith(
+                  color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
+              Text(emptyDesc,
+                  style: AppTextStyles.bodyMedium.copyWith(
+                      color: AppColors.textTertiary),
+                  textAlign: TextAlign.center),
+            ]),
+          )),
+        ),
       ]);
     }
 
@@ -125,7 +198,6 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
       itemBuilder: (_, i) {
         final g     = grupos[i];
         final items = g['items'] as List<Map<String, dynamic>>;
-        final startIdx = lista.indexWhere((x) => x == items.first);
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           // Separador de fecha
           Padding(
@@ -143,49 +215,57 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                         color: AppColors.primaryPurple)),
               ),
               const SizedBox(width: 8),
-              Expanded(child: Divider(
-                  color: AppColors.borderLight, height: 1)),
+              Expanded(child: Divider(color: AppColors.borderLight, height: 1)),
               const SizedBox(width: 8),
               Text('${items.length} vacante${items.length == 1 ? '' : 's'}',
                   style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.textTertiary)),
             ]),
           ),
-          ...items.asMap().entries.map((e) =>
-              _buildItem(context, e.value, lista.indexOf(e.value), p)),
+          ...items.map((item) =>
+              _buildItem(context, item, lista.indexOf(item), p)),
         ]);
       },
     );
   }
 
+  // ── Card de item ─────────────────────────────────────────────────────────
   Widget _buildItem(BuildContext context, Map<String, dynamic> item,
       int idx, StudentProvider p) {
-    final tipo        = item['tipo']        as String? ?? 'dislike';
-    final titulo      = item['titulo']      as String? ?? 'Vacante';
-    final descripcion = item['descripcion'] as String? ?? '';
-    final modalidad   = item['modalidad']   as String? ?? '';
-    final ubicacion   = item['ubicacion']   as String? ?? '';
-    final minS        = item['sueldo_minimo'];
-    final maxS        = item['sueldo_maximo'];
-    final moneda      = item['moneda']      as String? ?? 'MXN';
-    final contrato    = item['tipo_contrato'] as String? ?? '';
-    final ts          = item['timestamp']   as String? ?? '';
-    final esMatch     = item['match'] == true;
-    final isLike      = tipo == 'like';
-    final totalViz    = item['total_visualizaciones'] as int?;
-    final sector      = item['sector']      as String?
-                     ?? item['tipo_empresa'] as String? ?? '';
+    final tipo          = item['tipo']          as String? ?? 'dislike';
+    final titulo        = item['titulo']        as String? ?? 'Vacante';
+    final descripcion   = item['descripcion']   as String? ?? '';
+    final modalidad     = item['modalidad']     as String? ?? '';
+    final ubicacion     = item['ubicacion']     as String? ?? '';
+    final minS          = item['sueldo_minimo'];
+    final maxS          = item['sueldo_maximo'];
+    final moneda        = item['moneda']        as String? ?? 'MXN';
+    final ts            = item['timestamp']     as String? ?? '';
+    final totalViz      = item['total_visualizaciones'] as int?;
+    final empresaNombre = item['empresa_nombre'] as String? ?? '';
+    final empresaSector = item['empresa_sector'] as String?
+                       ?? item['sector']         as String?
+                       ?? item['tipo_empresa']   as String? ?? '';
+    final esMatch       = _esMatch(item, p);
+    final esRechazado   = _esRechazado(item);
+    final isLike        = tipo == 'like';
 
     String salario = '';
     if (minS != null && maxS != null) salario = '\$$minS – \$$maxS $moneda';
     else if (minS != null)            salario = 'Desde \$$minS $moneda';
 
-    Color   accentColor;
+    // Colores según estado
+    Color    accentColor;
     IconData accentIcon;
-    String  estadoLabel;
-    Color   bgColor;
+    String   estadoLabel;
+    Color    bgColor;
 
-    if (isLike && esMatch) {
+    if (esRechazado) {
+      accentColor = AppColors.error;
+      accentIcon  = Icons.cancel_outlined;
+      estadoLabel = 'Rechazado por la empresa';
+      bgColor     = AppColors.error.withOpacity(0.04);
+    } else if (esMatch) {
       accentColor = AppColors.accentGreen;
       accentIcon  = Icons.favorite;
       estadoLabel = '¡Match! 🎉';
@@ -212,14 +292,16 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
           borderRadius: BorderRadius.circular(16),
           border: esMatch
               ? Border.all(color: AppColors.accentGreen.withOpacity(0.4), width: 1.5)
-              : Border.all(color: AppColors.borderLight.withOpacity(0.5)),
+              : esRechazado
+                  ? Border.all(color: AppColors.error.withOpacity(0.3), width: 1.5)
+                  : Border.all(color: AppColors.borderLight.withOpacity(0.5)),
           boxShadow: [BoxShadow(
               color: Colors.black.withOpacity(0.04),
               blurRadius: 8, offset: const Offset(0, 2))],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-          // ── Header con estado ─────────────────────────────────────────
+          // ── Header estado ────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
@@ -247,37 +329,40 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
             ]),
           ),
 
-          // ── Cuerpo ────────────────────────────────────────────────────
+          // ── Cuerpo ───────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
               // Logo empresa
               Container(
                 width: 44, height: 44,
                 decoration: BoxDecoration(
-                  color: isLike
+                  color: isLike || esMatch
                       ? accentColor.withOpacity(0.12)
                       : AppColors.textTertiary.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  isLike ? Icons.business : Icons.business_outlined,
-                  color: isLike ? accentColor : AppColors.textTertiary,
+                  isLike || esMatch ? Icons.business : Icons.business_outlined,
+                  color: isLike || esMatch ? accentColor : AppColors.textTertiary,
                   size: 22,
                 ),
               ),
               const SizedBox(width: 12),
-
-              // Info
               Expanded(child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(titulo, style: AppTextStyles.subtitle1.copyWith(
                     fontWeight: FontWeight.w600,
                     color: isLike ? null : AppColors.textSecondary)),
-                if (sector.isNotEmpty) ...[
+                if (empresaNombre.isNotEmpty) ...[
                   const SizedBox(height: 2),
-                  Text(sector, style: AppTextStyles.bodySmall.copyWith(
+                  Text(empresaNombre, style: AppTextStyles.bodySmall.copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w500)),
+                ],
+                if (empresaSector.isNotEmpty) ...[
+                  const SizedBox(height: 1),
+                  Text(empresaSector, style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.textTertiary)),
                 ],
                 const SizedBox(height: 6),
@@ -300,8 +385,6 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                           color: AppColors.textTertiary, height: 1.4)),
                 ],
               ])),
-
-              // Flecha ver más
               const SizedBox(width: 4),
               Icon(Icons.chevron_right, size: 18,
                   color: AppColors.textTertiary),
@@ -312,8 +395,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
             child: Row(children: [
-              // LIKE sin match → botón descartar
-              if (isLike && !esMatch)
+              if (isLike && !esMatch && !esRechazado)
                 Expanded(child: OutlinedButton.icon(
                   onPressed: () => _descartar(context, idx),
                   icon: const Icon(Icons.close, size: 14, color: AppColors.error),
@@ -327,7 +409,6 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                         borderRadius: BorderRadius.circular(8)),
                   ),
                 )),
-              // MATCH → label informativo
               if (esMatch)
                 Expanded(child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 6),
@@ -345,12 +426,29 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                         fontWeight: FontWeight.w600)),
                   ]),
                 )),
-              // DISLIKE → botón me interesa
-              if (!isLike) ...[
+              if (esRechazado)
+                Expanded(child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.info_outline, size: 14,
+                        color: AppColors.error),
+                    SizedBox(width: 4),
+                    Text('Ver feedback', style: TextStyle(
+                        fontSize: 12, color: AppColors.error,
+                        fontWeight: FontWeight.w600)),
+                  ]),
+                )),
+              if (!isLike && !esRechazado) ...[
                 Expanded(child: ElevatedButton.icon(
                   onPressed: () => _cambiarALike(context, idx, p),
                   icon: const Icon(Icons.favorite_outline, size: 14),
-                  label: const Text('Me interesa', style: TextStyle(fontSize: 12)),
+                  label: const Text('Me interesa',
+                      style: TextStyle(fontSize: 12)),
                   style: ElevatedButton.styleFrom(
                     minimumSize: const Size(0, 32),
                     padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -368,72 +466,109 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
     );
   }
 
-  // ── Detalle completo al tocar una card ────────────────────────────────────
+  // ── Bottom sheet de detalles ──────────────────────────────────────────────
   void _showDetalles(BuildContext context, Map<String, dynamic> v,
       int idx, StudentProvider p) {
-    final titulo      = v['titulo']        as String? ?? 'Vacante';
-    final desc        = v['descripcion']   as String? ?? '';
-    final requi       = v['requisitos']    as String? ?? '';
-    final modalidad   = v['modalidad']     as String? ?? '';
-    final ubicacion   = v['ubicacion']     as String? ?? '';
-    final minS        = v['sueldo_minimo'];
-    final maxS        = v['sueldo_maximo'];
-    final moneda      = v['moneda']        as String? ?? 'MXN';
-    final contrato    = v['tipo_contrato'] as String? ?? '';
-    final sector      = v['sector']        as String?
-                     ?? v['tipo_empresa']  as String? ?? '';
-    final isLike      = (v['tipo'] == 'like') || (v['le_dio_like'] == true);
-    final esMatch     = v['match'] == true;
-    final totalViz    = v['total_visualizaciones'] as int?;
-    final primeraViz  = v['primera_visualizacion'] as String? ?? '';
+    final titulo        = v['titulo']         as String? ?? 'Vacante';
+    final desc          = v['descripcion']    as String? ?? '';
+    final requi         = v['requisitos']     as String? ?? '';
+    final modalidad     = v['modalidad']      as String? ?? '';
+    final ubicacion     = v['ubicacion']      as String? ?? '';
+    final minS          = v['sueldo_minimo'];
+    final maxS          = v['sueldo_maximo'];
+    final moneda        = v['moneda']         as String? ?? 'MXN';
+    final contrato      = v['tipo_contrato']  as String? ?? '';
+    final empresaNombre = v['empresa_nombre'] as String?
+                       ?? v['empresa']        as String? ?? '';
+    final empresaSector = v['empresa_sector'] as String?
+                       ?? v['sector']         as String?
+                       ?? v['tipo_empresa']   as String? ?? '';
+    final empresaDesc   = v['empresa_descripcion'] as String? ?? '';
+    final empresaWeb    = v['empresa_sitio_web']   as String? ?? '';
+    final empresaUbic   = v['empresa_ubicacion']   as String? ?? '';
+    final isLike        = (v['tipo'] == 'like') || (v['le_dio_like'] == true);
+    final esMatch       = _esMatch(v, p);
+    final esRechazado   = _esRechazado(v);
+    final totalViz      = v['total_visualizaciones'] as int?;
+    final primeraViz    = v['primera_visualizacion'] as String? ?? '';
+    final feedback      = v['feedback']       as Map<String, dynamic>?;
+    final camposMejora  = v['campos_mejora']  as String?
+                       ?? feedback?['campos_mejora'] as String? ?? '';
+    final sugerencias   = v['sugerencias_perfil'] as String?
+                       ?? feedback?['sugerencias_perfil'] as String? ?? '';
 
     String salario = '';
     if (minS != null && maxS != null) salario = '\$$minS – \$$maxS $moneda';
     else if (minS != null)            salario = 'Desde \$$minS $moneda';
 
-    Color accentColor = isLike
-        ? (esMatch ? AppColors.accentGreen : AppColors.primaryPurple)
-        : AppColors.textTertiary;
-    String estadoLabel = esMatch ? '¡Match! 🎉'
-        : isLike ? 'Te gustó esta vacante' : 'Pasaste esta vacante';
+    Color accentColor;
+    String estadoLabel;
+    if (esRechazado) {
+      accentColor = AppColors.error;
+      estadoLabel = 'Rechazado por la empresa';
+    } else if (esMatch) {
+      accentColor = AppColors.accentGreen;
+      estadoLabel = '¡Match! 🎉';
+    } else if (isLike) {
+      accentColor = AppColors.primaryPurple;
+      estadoLabel = 'Te gustó esta vacante';
+    } else {
+      accentColor = AppColors.textTertiary;
+      estadoLabel = 'Pasaste esta vacante';
+    }
 
     showModalBottomSheet(
-      context: context, backgroundColor: Colors.transparent,
+      context: context,
+      backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => DraggableScrollableSheet(
-        initialChildSize: 0.85, maxChildSize: 0.95, minChildSize: 0.5,
+        initialChildSize: 0.88,
+        maxChildSize: 0.95,
+        minChildSize: 0.5,
         builder: (__, ctrl) => Container(
           decoration: BoxDecoration(
             color: Theme.of(context).cardColor,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(24))),
           child: Column(children: [
-            Container(margin: const EdgeInsets.only(top: 12),
-                width: 40, height: 4,
-                decoration: BoxDecoration(color: AppColors.borderLight,
-                    borderRadius: BorderRadius.circular(2))),
+            // Handle
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.borderLight,
+                borderRadius: BorderRadius.circular(2)),
+            ),
 
-            // Header
+            // ── Header ───────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
               child: Row(children: [
-                Container(width: 52, height: 52,
+                Container(
+                  width: 52, height: 52,
                   decoration: BoxDecoration(
-                    gradient: isLike ? AppColors.purpleGradient : null,
-                    color: isLike ? null
+                    gradient: (isLike || esMatch) ? AppColors.purpleGradient : null,
+                    color: (isLike || esMatch) ? null
                         : AppColors.textTertiary.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(Icons.business,
-                      color: isLike ? Colors.white : AppColors.textTertiary,
+                      color: (isLike || esMatch) ? Colors.white
+                          : AppColors.textTertiary,
                       size: 26)),
                 const SizedBox(width: 14),
                 Expanded(child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(titulo, style: AppTextStyles.h4.copyWith(
                       fontWeight: FontWeight.bold)),
-                  if (sector.isNotEmpty)
-                    Text(sector, style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textSecondary)),
+                  if (empresaNombre.isNotEmpty)
+                    Text(empresaNombre,
+                        style: AppTextStyles.bodyMedium.copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w600)),
+                  if (empresaSector.isNotEmpty)
+                    Text(empresaSector, style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textTertiary)),
                   const SizedBox(height: 4),
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -457,7 +592,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
               child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
 
-                // Chips info
+                // ── Chips de la vacante ───────────────────────────────
                 Wrap(spacing: 8, runSpacing: 8, children: [
                   if (modalidad.isNotEmpty) _chip(Icons.work_outline,
                       _lModal(modalidad), AppColors.primaryPurple),
@@ -470,7 +605,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                 ]),
                 const SizedBox(height: 16),
 
-                // Stats de visualización
+                // ── Stats visualización ───────────────────────────────
                 if (totalViz != null || primeraViz.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -500,6 +635,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                   ),
                 const SizedBox(height: 16),
 
+                // ── Descripción vacante ───────────────────────────────
                 if (desc.isNotEmpty) ...[
                   _sectionTitle('Descripción del puesto'),
                   const SizedBox(height: 8),
@@ -515,8 +651,125 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                   const SizedBox(height: 18),
                 ],
 
-                // ── Acciones al pie del detalle ─────────────────────
-                if (!isLike)
+                // ── Sección empresa ───────────────────────────────────
+                if (empresaNombre.isNotEmpty || empresaDesc.isNotEmpty ||
+                    empresaWeb.isNotEmpty || empresaUbic.isNotEmpty) ...[
+                  _sectionTitle('Sobre la empresa'),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.accentBlue.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: AppColors.accentBlue.withOpacity(0.15)),
+                    ),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      // Nombre + sector
+                      Row(children: [
+                        Container(
+                          width: 40, height: 40,
+                          decoration: BoxDecoration(
+                            color: AppColors.accentBlue.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.business,
+                              color: AppColors.accentBlue, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          if (empresaNombre.isNotEmpty)
+                            Text(empresaNombre,
+                                style: AppTextStyles.subtitle1.copyWith(
+                                    fontWeight: FontWeight.bold)),
+                          if (empresaSector.isNotEmpty)
+                            Text(empresaSector,
+                                style: AppTextStyles.bodySmall.copyWith(
+                                    color: AppColors.textTertiary)),
+                        ])),
+                      ]),
+
+                      if (empresaDesc.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Text(empresaDesc,
+                            style: AppTextStyles.bodyMedium.copyWith(
+                                color: AppColors.textSecondary, height: 1.5)),
+                      ],
+
+                      if (empresaUbic.isNotEmpty || empresaWeb.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        if (empresaUbic.isNotEmpty)
+                          _empresaInfoRow(
+                              Icons.location_on_outlined, empresaUbic),
+                        if (empresaWeb.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          _empresaInfoRow(
+                              Icons.language_outlined, empresaWeb,
+                              color: AppColors.accentBlue),
+                        ],
+                      ],
+                    ]),
+                  ),
+                  const SizedBox(height: 18),
+                ],
+
+                // ── Feedback de rechazo ───────────────────────────────
+                if (esRechazado && (camposMejora.isNotEmpty || sugerencias.isNotEmpty)) ...[
+                  _sectionTitle('Feedback de la empresa'),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.error.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: AppColors.error.withOpacity(0.2)),
+                    ),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Row(children: [
+                        const Icon(Icons.lightbulb_outline,
+                            color: AppColors.error, size: 18),
+                        const SizedBox(width: 8),
+                        Text('Áreas de mejora',
+                            style: AppTextStyles.bodyMedium.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.error)),
+                      ]),
+                      if (camposMejora.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(camposMejora,
+                            style: AppTextStyles.bodyMedium.copyWith(
+                                color: AppColors.textSecondary, height: 1.5)),
+                      ],
+                      if (sugerencias.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        Row(children: [
+                          const Icon(Icons.tips_and_updates_outlined,
+                              color: AppColors.accentBlue, size: 18),
+                          const SizedBox(width: 8),
+                          Text('Sugerencias de perfil',
+                              style: AppTextStyles.bodyMedium.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.accentBlue)),
+                        ]),
+                        const SizedBox(height: 8),
+                        Text(sugerencias,
+                            style: AppTextStyles.bodyMedium.copyWith(
+                                color: AppColors.textSecondary, height: 1.5)),
+                      ],
+                    ]),
+                  ),
+                  const SizedBox(height: 18),
+                ],
+
+                // ── Acciones al pie ───────────────────────────────────
+                if (!isLike && !esRechazado)
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -535,7 +788,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                       ),
                     ),
                   ),
-                if (isLike && !esMatch)
+                if (isLike && !esMatch && !esRechazado)
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
@@ -548,6 +801,22 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                           style: TextStyle(color: AppColors.error)),
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: AppColors.error),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
+                  ),
+                if (esMatch)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.chat_bubble_outline),
+                      label: const Text('Ver postulación'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accentGreen,
+                        foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -579,7 +848,8 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(esMatch ? '¡Es un match! 🎉' : '¡Agregado a tus likes!'),
-      backgroundColor: esMatch ? AppColors.accentGreen : AppColors.primaryPurple,
+      backgroundColor:
+          esMatch ? AppColors.accentGreen : AppColors.primaryPurple,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ));
@@ -589,25 +859,37 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
   Widget _sectionTitle(String t) => Text(t,
       style: AppTextStyles.subtitle1.copyWith(fontWeight: FontWeight.bold));
 
+  Widget _empresaInfoRow(IconData icon, String text, {Color? color}) =>
+      Row(children: [
+        Icon(icon, size: 14,
+            color: color ?? AppColors.textTertiary),
+        const SizedBox(width: 6),
+        Expanded(child: Text(text,
+            style: AppTextStyles.bodySmall.copyWith(
+                color: color ?? AppColors.textSecondary))),
+      ]);
+
   Widget _chip(IconData icon, String label, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-    decoration: BoxDecoration(color: color.withOpacity(0.1),
+    decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(20)),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 13, color: color), const SizedBox(width: 4),
-      Text(label, style: TextStyle(fontSize: 12, color: color,
-          fontWeight: FontWeight.w600)),
+      Text(label, style: TextStyle(
+          fontSize: 12, color: color, fontWeight: FontWeight.w600)),
     ]),
   );
 
   Widget _chipMini(IconData icon, String label, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-    decoration: BoxDecoration(color: color.withOpacity(0.1),
+    decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(8)),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 11, color: color), const SizedBox(width: 3),
-      Text(label, style: TextStyle(fontSize: 11, color: color,
-          fontWeight: FontWeight.w600)),
+      Text(label, style: TextStyle(
+          fontSize: 11, color: color, fontWeight: FontWeight.w600)),
     ]),
   );
 
@@ -615,7 +897,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
   List<Map<String, dynamic>> _agrupar(List<Map<String, dynamic>> lista) {
     final Map<String, List<Map<String, dynamic>>> mapa = {};
     for (final item in lista) {
-      final ts  = item['timestamp'] as String? ?? '';
+      final ts = item['timestamp'] as String? ?? '';
       String key;
       try {
         final d   = DateTime.parse(ts).toLocal();
@@ -632,13 +914,16 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
       } catch (_) { key = 'Sin fecha'; }
       mapa.putIfAbsent(key, () => []).add(item);
     }
-    return mapa.entries.map((e) => {'fecha': e.key, 'items': e.value}).toList();
+    return mapa.entries
+        .map((e) => {'fecha': e.key, 'items': e.value})
+        .toList();
   }
 
   String _formatHora(String ts) {
     try {
       final d = DateTime.parse(ts).toLocal();
-      return '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
+      return '${d.hour.toString().padLeft(2, '0')}:'
+          '${d.minute.toString().padLeft(2, '0')}';
     } catch (_) { return ''; }
   }
 
@@ -647,7 +932,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
       final d = DateTime.parse(ts).toLocal();
       const m = ['ene','feb','mar','abr','may','jun',
                   'jul','ago','sep','oct','nov','dic'];
-      return '${d.day} de ${m[d.month-1]}';
+      return '${d.day} de ${m[d.month - 1]}';
     } catch (_) { return ''; }
   }
 
