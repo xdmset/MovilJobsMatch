@@ -190,15 +190,27 @@ class StudentProvider extends ChangeNotifier {
     try {
       final lista = await _repo.getMatches(estudianteId);
       _matchesServidor.clear();
+
+      // Enriquecer cada match con datos de la vacante.
+      // Primero buscar en historial local, si no existe pedirla al backend.
       for (final m in lista) {
         final vacanteId = m['vacante_id'] as int?;
-        final vacanteData = vacanteId != null
-            ? _historial.firstWhere(
-                (h) => h['id'] == vacanteId, orElse: () => {})
-            : <String, dynamic>{};
+
+        // 1. Buscar en historial local (ya enriquecida con empresa)
+        Map<String, dynamic>? vacanteData = vacanteId != null
+            ? _historial.cast<Map<String, dynamic>?>()
+                .firstWhere((h) => h?['id'] == vacanteId, orElse: () => null)
+            : null;
+
+        // 2. Si no está en historial, pedir la vacante al backend con datos de empresa
+        if ((vacanteData == null || vacanteData.isEmpty) && vacanteId != null) {
+          debugPrint('[StudentProvider] match vacante $vacanteId no en historial, cargando...');
+          vacanteData = await _repo.getVacanteById(vacanteId);
+        }
+
         _matchesServidor.add({
           ...m,
-          'vacante': vacanteData.isNotEmpty ? vacanteData : {'id': vacanteId},
+          'vacante': vacanteData ?? {'id': vacanteId},
         });
       }
       notifyListeners();

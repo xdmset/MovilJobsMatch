@@ -142,6 +142,19 @@ class StudentRepository {
     }
   }
 
+  // ── Obtener vacante individual con datos de empresa ───────────────────────
+  Future<Map<String, dynamic>?> getVacanteById(int vacanteId) async {
+    try {
+      final raw = await _api.get('/vacante/$vacanteId', auth: true);
+      if (raw is! Map<String, dynamic>) return null;
+      final lista = await _enriquecerConEmpresa([raw]);
+      return lista.isNotEmpty ? lista.first : null;
+    } catch (e) {
+      debugPrint('[StudentRepo] getVacanteById $vacanteId error: $e');
+      return null;
+    }
+  }
+
   // ── Registrar swipe ───────────────────────────────────────────────────────
   // POST /swipes/{estudiante_id}
   // body: { vacante_id, interes_estudiante: bool }

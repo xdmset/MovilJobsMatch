@@ -40,19 +40,38 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
 
   // ── Helpers para clasificar items ─────────────────────────────────────────
 
-  /// Un item es "match" si tiene match:true O su id aparece en matches del servidor
+  /// Un item es "match" si tiene match:true O su id aparece en matches del servidor.
+  /// FIX: los matches tienen el vacante_id en distintos lugares segun su origen:
+  ///   - matchesServidor: { vacante_id: int, vacante: {...} }
+  ///   - matchesSesion:   { vacante: { id: int, ... } }
   bool _esMatch(Map<String, dynamic> item, StudentProvider p) {
     if (item['match'] == true) return true;
     final vacanteId = item['id'] as int?;
     if (vacanteId == null) return false;
-    return p.matches.any((m) => m['vacante_id'] == vacanteId);
+    return p.matches.any((m) {
+      // Caso 1: vacante_id directo (matchesServidor)
+      final mid = m['vacante_id'] as int?;
+      if (mid != null && mid == vacanteId) return true;
+      // Caso 2: id dentro de vacante anidado (matchesSesion)
+      final vacante = m['vacante'] as Map<String, dynamic>?;
+      final vid = vacante?['id'] as int? ?? vacante?['vacante_id'] as int?;
+      return vid == vacanteId;
+    });
   }
 
-  /// Un item fue "rechazado por la empresa" si hay una postulación con
-  /// estado == 'rechazada'. El campo viene del historial enriquecido.
-  bool _esRechazado(Map<String, dynamic> item) {
-    final estado = item['estado_postulacion'] as String? ?? '';
-    return estado == 'rechazada';
+  /// Un item fue "rechazado" si la vacante ya cerro (estado cerrada/inactiva)
+  /// y el estudiante habia dado like pero NO hay match.
+  /// FIX: el backend NO expone estado_postulacion en el historial del estudiante,
+  /// se detecta por estado de la vacante + le_dio_like sin match.
+  bool _esRechazado(Map<String, dynamic> item, StudentProvider p) {
+    // Si hay match, no es rechazo
+    if (_esMatch(item, p)) return false;
+    // Si el estudiante no dio like, tampoco es rechazo (es solo dislike)
+    final leDioLike = item['le_dio_like'] as bool? ?? (item['tipo'] == 'like');
+    if (!leDioLike) return false;
+    // Es rechazo si la vacante ya cerro
+    final estado = (item['estado'] as String? ?? '').toLowerCase();
+    return estado == 'cerrada' || estado == 'inactiva' || estado == 'archivada';
   }
 
   @override
@@ -60,10 +79,10 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
     return Consumer<StudentProvider>(builder: (context, p, _) {
       // Clasificar listas
       final todo      = List<Map<String, dynamic>>.from(p.historial);
-      final likes     = todo.where((h) => (h['tipo'] == 'like') && !_esMatch(h, p) && !_esRechazado(h)).toList();
+      final likes     = todo.where((h) => (h['tipo'] == 'like') && !_esMatch(h, p) && !_esRechazado(h, p)).toList();
       final dislikes  = todo.where((h) => h['tipo'] == 'dislike').toList();
       final matches   = todo.where((h) => _esMatch(h, p)).toList();
-      final rechazados = todo.where((h) => _esRechazado(h)).toList();
+      final rechazados = todo.where((h) => _esRechazado(h, p)).toList();
 
       return Scaffold(
         appBar: AppBar(
@@ -247,7 +266,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                        ?? item['sector']         as String?
                        ?? item['tipo_empresa']   as String? ?? '';
     final esMatch       = _esMatch(item, p);
-    final esRechazado   = _esRechazado(item);
+    final esRechazado   = _esRechazado(item, p);
     final isLike        = tipo == 'like';
 
     String salario = '';
@@ -488,7 +507,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
     final empresaUbic   = v['empresa_ubicacion']   as String? ?? '';
     final isLike        = (v['tipo'] == 'like') || (v['le_dio_like'] == true);
     final esMatch       = _esMatch(v, p);
-    final esRechazado   = _esRechazado(v);
+    final esRechazado   = _esRechazado(v, p);
     final totalViz      = v['total_visualizaciones'] as int?;
     final primeraViz    = v['primera_visualizacion'] as String? ?? '';
     final feedback      = v['feedback']       as Map<String, dynamic>?;
