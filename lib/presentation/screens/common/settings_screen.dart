@@ -154,7 +154,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(error!,
-                    style: TextStyle(color: AppColors.error, fontSize: 13)),
+                    style: const TextStyle(color: AppColors.error, fontSize: 13)),
               ),
             TextField(
               controller: currentCtrl,
@@ -432,6 +432,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       subtitle: Text(subtitle, style: AppTextStyles.bodySmall.copyWith(
           color: AppColors.textSecondary)),
       trailing: Switch(value: value, onChanged: onChanged,
-          activeColor: AppColors.primaryPurple),
+          activeThumbColor: AppColors.primaryPurple),
     );
 }

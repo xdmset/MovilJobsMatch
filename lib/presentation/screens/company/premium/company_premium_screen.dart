@@ -30,21 +30,35 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen>
   String? _pendingId;
 
   static const _returnUrl =
-      'jobmatch://paypal-success';
+      'https://jobmatch.com.mx/payments/paypal/mobile-success';
   static const _cancelUrl =
-      'jobmatch://paypal-cancel';
+      'https://jobmatch.com.mx/payments/paypal/mobile-cancel';
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // FIX: Listener para detectar cambios en esPremium (cuando se cancela)
+    context.read<AuthProvider>().addListener(_onAuthChanged);
     _init();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Remover listener de AuthProvider
+    context.read<AuthProvider>().removeListener(_onAuthChanged);
     super.dispose();
+  }
+
+  // FIX: Callback cuando cambia el estado de autenticación/premium
+  void _onAuthChanged() {
+    debugPrint('[CompanyPremium] Auth cambió, recargando...');
+    if (mounted) {
+      // Recargar suscripción y planes para reflejar cambio
+      _cargarSuscripcion();
+      _cargarPlanes();
+    }
   }
 
   @override
@@ -122,7 +136,8 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen>
   }
 
   Future<void> _cargarSuscripcion() async {
-    final userId = context.read<AuthProvider>().userId;
+    final auth = context.read<AuthProvider>();
+    final userId = auth.userId;
     if (userId == null) return;
     try {
       final sub = await _repo.getSuscripcionActual(userId);
@@ -176,8 +191,11 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen>
   String? get _paypalSubId {
     final sub = _suscripcionActual;
     if (sub == null) return null;
+    // Intentar obtener paypal_subscription_id de varias ubicaciones
     return sub['paypal_subscription_id'] as String?
-        ?? sub['suscripcion']?['paypal_subscription_id'] as String?;
+        ?? sub['suscripcion']?['paypal_subscription_id'] as String?
+        ?? sub['paypal_sub_id'] as String? // Variación de nombre
+        ?? sub['id']?.toString(); // Fallback: usar id local si no tiene paypal_subscription_id
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────
@@ -286,10 +304,10 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen>
         color: Colors.amber.withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.amber.withOpacity(0.4))),
-    child: Row(children: [
-      const Icon(Icons.pending_outlined, color: Colors.amber),
-      const SizedBox(width: 10),
-      const Expanded(
+    child: const Row(children: [
+      Icon(Icons.pending_outlined, color: Colors.amber),
+      SizedBox(width: 10),
+      Expanded(
         child: Text(
           'Pago pendiente de verificación. Toca "Verificar" después de completar el pago en PayPal.',
           style: TextStyle(color: Colors.amber, fontSize: 13),
@@ -495,12 +513,14 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen>
     if (_pendingId == null) return;
     setState(() => _procesando = true);
     try {
+      final auth = context.read<AuthProvider>();
+      
       await _repo.sincronizar(_pendingId!);
-      await context.read<AuthProvider>().refrescarUsuario();
+      await auth.refrescarUsuario();
       await _limpiarPendiente();
       await _cargarSuscripcion();
 
-      if (mounted && context.read<AuthProvider>().esPremium) {
+      if (mounted && auth.esPremium) {
         _showSuccessDialog();
       } else {
         _snack('Pago pendiente de confirmación por PayPal');
@@ -546,10 +566,29 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen>
     }
     setState(() => _procesando = true);
     try {
+      final auth = context.read<AuthProvider>();
+      
       await _repo.cancelar(subId, razon: 'Cancelada por empresa desde la app');
-      await context.read<AuthProvider>().refrescarUsuario();
-      await _cargarSuscripcion();
-      if (mounted) _snack('Suscripción cancelada correctamente');
+      
+      // FIX: Limpiar estado local ANTES de refrescar usuario
+      setState(() {
+        _suscripcionActual = null;
+        _planes = [];
+        _planSel = null;
+      });
+      
+      // Refrescar auth (cambiar esPremium a false)
+      await auth.refrescarUsuario();
+      
+      // Esperar un poco para asegurar que el estado se actualiza completamente
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Recargar planes ahora que esPremium es false
+      if (mounted) {
+        await _cargarPlanes();
+        await _cargarSuscripcion();
+        _snack('Suscripción cancelada correctamente');
+      }
     } catch (e) {
       _snack('Error al cancelar: $e', isError: true);
     } finally {
@@ -564,12 +603,12 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen>
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(
             padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
                 color: AppColors.accentBlue, shape: BoxShape.circle),
             child: const Icon(Icons.business_center,
                 color: Colors.white, size: 44)),
           const SizedBox(height: 14),
-          Text('¡Business Activado! 🚀',
+          const Text('¡Business Activado! 🚀',
               style: AppTextStyles.h3, textAlign: TextAlign.center),
           const SizedBox(height: 8),
           Text('Tu empresa ahora tiene acceso completo a JobMatch.',

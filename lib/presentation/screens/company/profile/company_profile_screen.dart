@@ -123,8 +123,9 @@ class _CompanyProfileScreenState extends State<CompanyProfileScreen> {
     final sector   = perfil?.sector as String?;
     final sede     = perfil?.ubicacionSede as String?;
     // Intentar ambos nombres por compatibilidad con versiones del modelo
-    final fotoUrl = (perfil?.fotoPerfilUrl as String? )
-        ?? (perfil?.fotoPerfigUrl as String?);
+    // final fotoUrl = (perfil?.fotoPerfilUrl as String? )
+    //     ?? (perfil?.fotoPerfigUrl as String?);
+    final fotoUrl = perfil?.fotoPerfilUrl;
     final initials = nombre.isNotEmpty ? nombre[0].toUpperCase() : '?';
 
     return Container(

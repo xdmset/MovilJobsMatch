@@ -178,7 +178,9 @@ class StudentProvider extends ChangeNotifier {
       _dailySwipes = prefs.getInt(key) ?? 0;
       final keysViejas = prefs.getKeys()
           .where((k) => k.startsWith('hourly_swipes_${estudianteId}_') && k != key);
-      for (final k in keysViejas) await prefs.remove(k);
+      for (final k in keysViejas) {
+        await prefs.remove(k);
+      }
     } catch (_) {}
   }
 
@@ -302,7 +304,9 @@ class StudentProvider extends ChangeNotifier {
         final desc   = (v['descripcion']    as String? ?? '').toLowerCase();
         final requi  = (v['requisitos']     as String? ?? '').toLowerCase();
         if (!titulo.contains(q) && !empN.contains(q) &&
-            !desc.contains(q) && !requi.contains(q)) return false;
+            !desc.contains(q) && !requi.contains(q)) {
+          return false;
+        }
       }
       if (contrato != null && contrato.isNotEmpty) {
         final cFiltro = contrato.toLowerCase().trim();

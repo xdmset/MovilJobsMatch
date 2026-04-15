@@ -12,10 +12,15 @@ import '../../../providers/theme_provider.dart';
 import '../../../providers/settings_provider.dart';
 
 class CompanyHomeTab extends StatelessWidget {
+  final VoidCallback? onAbrirCandidatos;
   /// Callback para ir al tab de candidatos con filtro de vacante
   final void Function(int vacanteId, String titulo)? onIrACandidatos;
 
-  const CompanyHomeTab({super.key, this.onIrACandidatos});
+  const CompanyHomeTab({
+    super.key,
+    this.onAbrirCandidatos,
+    this.onIrACandidatos,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -194,14 +199,11 @@ class CompanyHomeTab extends StatelessWidget {
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
-        Text('Por revisar', style: AppTextStyles.h4),
+        const Text('Por revisar', style: AppTextStyles.h4),
         const Spacer(),
         if (comp.pendientes > 0)
           GestureDetector(
-            onTap: () {
-              // Ir al tab de candidatos sin filtro de vacante
-              // (el shell lo maneja)
-            },
+            onTap: onAbrirCandidatos,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
@@ -243,7 +245,13 @@ class CompanyHomeTab extends StatelessWidget {
         ? nombre[0].toUpperCase() : 'E';
 
     return GestureDetector(
-      onTap: () => _mostrarPerfilCandidato(context, candidato, comp),
+      onTap: () {
+        if (vacanteId != 0 && onIrACandidatos != null) {
+          onIrACandidatos!(vacanteId, tituloV);
+          return;
+        }
+        onAbrirCandidatos?.call();
+      },
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
@@ -297,7 +305,7 @@ class CompanyHomeTab extends StatelessWidget {
   Widget _buildSeccionVacantes(BuildContext context, CompanyProvider comp) {
     final vacantes = comp.vacantes.take(3).toList();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Mis vacantes', style: AppTextStyles.h4),
+      const Text('Mis vacantes', style: AppTextStyles.h4),
       const SizedBox(height: 12),
       if (vacantes.isEmpty)
         _emptyCard(context,

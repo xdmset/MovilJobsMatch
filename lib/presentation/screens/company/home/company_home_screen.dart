@@ -61,6 +61,10 @@ class _CompanyHomeScreenState extends State<CompanyHomeScreen>
 
     _pages = [
       CompanyHomeTab(
+        onAbrirCandidatos: () {
+          _shellNotifier.limpiarFiltro();
+          setState(() => _currentIndex = 2);
+        },
         onIrACandidatos: (vacanteId, titulo) {
           _shellNotifier.filtrarPorVacante(vacanteId, titulo);
           setState(() => _currentIndex = 2);

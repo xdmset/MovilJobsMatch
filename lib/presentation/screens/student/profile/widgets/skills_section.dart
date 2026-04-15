@@ -32,7 +32,7 @@ class SkillsSection extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Top Skills', style: AppTextStyles.h4),
+              const Text('Top Skills', style: AppTextStyles.h4),
               IconButton(
                 icon: const Icon(Icons.edit_outlined, size: 20),
                 onPressed: () {

@@ -84,9 +84,9 @@ class _StudentSettingsScreenState extends State<StudentSettingsScreen> {
                     child: Text('Mejorar',
                         style: AppTextStyles.bodySmall.copyWith(
                             color: Colors.white, fontWeight: FontWeight.bold))),
-            onTap: auth.esPremium
-                ? null
-                : () => context.push(AppRoutes.studentPremium),
+            // FIX: Permitir acceso a pantalla premium tanto si es premium (para cancelar)
+            // como si no lo es (para suscribirse)
+            onTap: () => context.push(AppRoutes.studentPremium),
           ),
         ]),
         const SizedBox(height: 20),
@@ -375,7 +375,7 @@ class _StudentSettingsScreenState extends State<StudentSettingsScreen> {
         trailing: Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: AppColors.primaryPurple),
+            activeThumbColor: AppColors.primaryPurple),
       );
 
   Widget _passField(TextEditingController ctrl, String label, bool obscure,

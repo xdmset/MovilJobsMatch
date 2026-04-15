@@ -234,7 +234,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                         color: AppColors.primaryPurple)),
               ),
               const SizedBox(width: 8),
-              Expanded(child: Divider(color: AppColors.borderLight, height: 1)),
+              const Expanded(child: Divider(color: AppColors.borderLight, height: 1)),
               const SizedBox(width: 8),
               Text('${items.length} vacante${items.length == 1 ? '' : 's'}',
                   style: AppTextStyles.bodySmall.copyWith(
@@ -270,8 +270,9 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
     final isLike        = tipo == 'like';
 
     String salario = '';
-    if (minS != null && maxS != null) salario = '\$$minS – \$$maxS $moneda';
-    else if (minS != null)            salario = 'Desde \$$minS $moneda';
+    if (minS != null && maxS != null) {
+      salario = '\$$minS – \$$maxS $moneda';
+    } else if (minS != null)            salario = 'Desde \$$minS $moneda';
 
     // Colores según estado
     Color    accentColor;
@@ -405,7 +406,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                 ],
               ])),
               const SizedBox(width: 4),
-              Icon(Icons.chevron_right, size: 18,
+              const Icon(Icons.chevron_right, size: 18,
                   color: AppColors.textTertiary),
             ]),
           ),
@@ -517,8 +518,9 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                        ?? feedback?['sugerencias_perfil'] as String? ?? '';
 
     String salario = '';
-    if (minS != null && maxS != null) salario = '\$$minS – \$$maxS $moneda';
-    else if (minS != null)            salario = 'Desde \$$minS $moneda';
+    if (minS != null && maxS != null) {
+      salario = '\$$minS – \$$maxS $moneda';
+    } else if (minS != null)            salario = 'Desde \$$minS $moneda';
 
     Color accentColor;
     String estadoLabel;
@@ -923,8 +925,9 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
         final now = DateTime.now();
         final hoy = DateTime(now.year, now.month, now.day);
         final dia = DateTime(d.year, d.month, d.day);
-        if (dia == hoy) key = 'Hoy';
-        else if (dia == hoy.subtract(const Duration(days: 1))) key = 'Ayer';
+        if (dia == hoy) {
+          key = 'Hoy';
+        } else if (dia == hoy.subtract(const Duration(days: 1))) key = 'Ayer';
         else {
           const m = ['ene','feb','mar','abr','may','jun',
                      'jul','ago','sep','oct','nov','dic'];

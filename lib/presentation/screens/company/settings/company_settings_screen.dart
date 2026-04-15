@@ -83,9 +83,9 @@ class _CompanySettingsScreenState extends State<CompanySettingsScreen> {
                     child: Text('Mejorar',
                         style: AppTextStyles.bodySmall.copyWith(
                             color: Colors.white, fontWeight: FontWeight.bold))),
-            onTap: auth.esPremium
-                ? null
-                : () => context.push(AppRoutes.companyPremium),
+            // FIX: Permitir acceso a pantalla premium tanto si es premium (para cancelar)
+            // como si no lo es (para suscribirse)
+            onTap: () => context.push(AppRoutes.companyPremium),
           ),
         ]),
         const SizedBox(height: 20),
@@ -156,7 +156,7 @@ class _CompanySettingsScreenState extends State<CompanySettingsScreen> {
         _header('Seguridad'),
         _buildCard(card, [
           ExpansionTile(
-            leading: Icon(Icons.lock_outline, color: AppColors.accentBlue),
+            leading: const Icon(Icons.lock_outline, color: AppColors.accentBlue),
             title: const Text('Cambiar contraseña'),
             subtitle: Text(
                 _cambioOk
@@ -332,7 +332,7 @@ class _CompanySettingsScreenState extends State<CompanySettingsScreen> {
           trailing: Switch(
               value: value,
               onChanged: onChanged,
-              activeColor: color ?? AppColors.accentBlue));
+              activeThumbColor: color ?? AppColors.accentBlue));
 
   Widget _passField(TextEditingController c, String label, bool obs,
           VoidCallback toggle, Color card) =>
@@ -342,7 +342,7 @@ class _CompanySettingsScreenState extends State<CompanySettingsScreen> {
           style: TextStyle(color: Theme.of(context).textTheme.bodyLarge?.color),
           decoration: InputDecoration(
               labelText: label,
-              prefixIcon: Icon(Icons.lock_outline, color: AppColors.accentBlue),
+              prefixIcon: const Icon(Icons.lock_outline, color: AppColors.accentBlue),
               suffixIcon: IconButton(
                   icon: Icon(obs
                       ? Icons.visibility_outlined
@@ -356,7 +356,7 @@ class _CompanySettingsScreenState extends State<CompanySettingsScreen> {
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide:
-                      BorderSide(color: AppColors.accentBlue, width: 2)),
+                      const BorderSide(color: AppColors.accentBlue, width: 2)),
               filled: true,
               fillColor: card));
 }

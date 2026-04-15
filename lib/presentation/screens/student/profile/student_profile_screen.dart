@@ -92,8 +92,9 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
       body: Consumer<PerfilProvider>(
         builder: (context, prov, _) {
           if (prov.cargando) return const Center(child: CircularProgressIndicator());
-          if (prov.status == PerfilStatus.error)
+          if (prov.status == PerfilStatus.error) {
             return _buildError(prov.error ?? 'Error desconocido');
+          }
           final perfil = prov.perfil;
           if (perfil == null) return _buildError('No se encontró el perfil.');
           return _buildContent(context, perfil);
@@ -201,21 +202,25 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
   Widget _buildInfoCard(Color card, PerfilEstudiante perfil) {
     final rows = <Widget>[];
 
-    if (perfil.edad != null)
+    if (perfil.edad != null) {
       rows.add(_infoRow(Icons.cake_outlined, 'Edad',
           '${perfil.edad} años', AppColors.accentBlue));
+    }
 
-    if (perfil.ubicacion != null && perfil.ubicacion!.isNotEmpty)
+    if (perfil.ubicacion != null && perfil.ubicacion!.isNotEmpty) {
       rows.add(_infoRow(Icons.location_on_outlined, 'Ubicación',
           perfil.ubicacion!, AppColors.accentGreen));
+    }
 
-    if (perfil.modalidadPreferida != null)
+    if (perfil.modalidadPreferida != null) {
       rows.add(_infoRow(Icons.work_outline, 'Modalidad preferida',
           _lModal(perfil.modalidadPreferida!), AppColors.primaryPurple));
+    }
 
-    if (perfil.nivelAcademico.isNotEmpty)
+    if (perfil.nivelAcademico.isNotEmpty) {
       rows.add(_infoRow(Icons.school_outlined, 'Nivel académico',
           perfil.nivelAcademico, AppColors.accentBlue));
+    }
 
     if (rows.isEmpty) return const SizedBox.shrink();
 

@@ -139,8 +139,9 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
         ),
       ),
       body: Consumer<StudentProvider>(builder: (context, p, _) {
-        if (p.cargandoHistorial && p.historial.isEmpty)
+        if (p.cargandoHistorial && p.historial.isEmpty) {
           return const Center(child: CircularProgressIndicator());
+        }
 
         return RefreshIndicator(
           onRefresh: _recargar,
@@ -199,9 +200,9 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
         ?? vacante['postulacion_id'] as int?;
 
     String salario = '';
-    if (minS != null && maxS != null)
+    if (minS != null && maxS != null) {
       salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
-    else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda';
+    } else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda';
 
     return GestureDetector(
       onTap: () => _showDetalle(context, vacante, accentColor: AppColors.accentGreen),
@@ -331,8 +332,9 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     final postulacionId = v['postulacion_id'] as int?;
 
     String salario = '';
-    if (minS != null && maxS != null) salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
-    else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda';
+    if (minS != null && maxS != null) {
+      salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
+    } else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda';
 
     return GestureDetector(
       onTap: () => _showDetalle(context, v, accentColor: AppColors.accentOrange),
@@ -436,8 +438,9 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     final postulacionId = v['postulacion_id'] as int?;
 
     String salario = '';
-    if (minS != null && maxS != null) salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
-    else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda';
+    if (minS != null && maxS != null) {
+      salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
+    } else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda';
 
     return GestureDetector(
       onTap: () => _showDetalle(context, v, accentColor: AppColors.error),
@@ -850,7 +853,7 @@ class _RetroSheetState extends State<_RetroSheet> {
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 40),
                           child: Column(children: [
-                            Icon(Icons.info_outline, size: 48,
+                            const Icon(Icons.info_outline, size: 48,
                                 color: AppColors.textTertiary),
                             const SizedBox(height: 16),
                             Text(_fase, style: AppTextStyles.subtitle1,
@@ -870,7 +873,7 @@ class _RetroSheetState extends State<_RetroSheet> {
     children: [
       Container(
         padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
             gradient: AppColors.purpleGradient, shape: BoxShape.circle),
         child: const Icon(Icons.auto_awesome, color: Colors.white, size: 32)),
       const SizedBox(height: 20),
@@ -972,10 +975,10 @@ class _RetroSheetState extends State<_RetroSheet> {
               color: Colors.amber.withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.amber.withOpacity(0.4))),
-          child: Row(children: [
-            const Icon(Icons.pending_outlined, color: Colors.amber),
-            const SizedBox(width: 10),
-            const Expanded(child: Text(
+          child: const Row(children: [
+            Icon(Icons.pending_outlined, color: Colors.amber),
+            SizedBox(width: 10),
+            Expanded(child: Text(
               'El plan de acción está siendo generado. Vuelve en unos momentos.',
               style: TextStyle(color: Colors.amber),
             )),

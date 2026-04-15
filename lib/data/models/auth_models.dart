@@ -20,8 +20,9 @@ class UserModel {
     // Detectar rol por string o por id
     int rolId = j['rol_id'] as int? ?? 2;
     final rolStr = j['rol'] as String?;
-    if (rolStr == 'empresa') rolId = 3;
-    else if (rolStr == 'admin') rolId = 1;
+    if (rolStr == 'empresa') {
+      rolId = 3;
+    } else if (rolStr == 'admin') rolId = 1;
     else if (rolStr == 'estudiante') rolId = 2;
 
     return UserModel(
@@ -68,9 +69,7 @@ class PerfilEstudiante {
     institucionEducativa: j['institucion_educativa'] as String,
     nivelAcademico:       j['nivel_academico']       as String,
     biografia:            j['biografia']             as String?,
-    habilidades:          j['habilidades'] != null
-                            ? j['habilidades'].toString()
-                            : null,
+    habilidades:          j['habilidades']?.toString(),
     ubicacion:            j['ubicacion']             as String?,
     modalidadPreferida:   j['modalidad_preferida']   as String?,
     usuarioId:            j['usuario_id']            as int,

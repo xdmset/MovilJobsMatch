@@ -108,7 +108,9 @@ class _RegisterStudentScreenState extends State<RegisterStudentScreen> {
     final hoy = DateTime.now();
     int edad  = hoy.year - nac.year;
     if (hoy.month < nac.month ||
-        (hoy.month == nac.month && hoy.day < nac.day)) edad--;
+        (hoy.month == nac.month && hoy.day < nac.day)) {
+      edad--;
+    }
     return edad;
   }
 
@@ -216,7 +218,7 @@ class _RegisterStudentScreenState extends State<RegisterStudentScreen> {
   Widget _buildPaso1() => SingleChildScrollView(
     padding: const EdgeInsets.all(24),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Crea tu cuenta', style: AppTextStyles.h2),
+      const Text('Crea tu cuenta', style: AppTextStyles.h2),
       const SizedBox(height: 8),
       Text('Ingresa tu correo y contraseña',
           style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary)),
@@ -242,7 +244,7 @@ class _RegisterStudentScreenState extends State<RegisterStudentScreen> {
       const SizedBox(height: 24),
       _buildErrorBanner(),
       Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Text('¿Ya tienes cuenta? ', style: AppTextStyles.bodyMedium),
+        const Text('¿Ya tienes cuenta? ', style: AppTextStyles.bodyMedium),
         TextButton(
             onPressed: () => context.go(AppRoutes.login),
             child: const Text('Inicia sesión')),
@@ -253,7 +255,7 @@ class _RegisterStudentScreenState extends State<RegisterStudentScreen> {
   Widget _buildPaso2() => SingleChildScrollView(
     padding: const EdgeInsets.all(24),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Datos de tu perfil', style: AppTextStyles.h2),
+      const Text('Datos de tu perfil', style: AppTextStyles.h2),
       const SizedBox(height: 8),
       Text('Esta información aparecerá en tu perfil',
           style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary)),
@@ -286,7 +288,7 @@ class _RegisterStudentScreenState extends State<RegisterStudentScreen> {
                   color: _fechaNacimiento == null
                       ? AppColors.textTertiary : AppColors.textPrimary,
                 ))),
-            Icon(Icons.calendar_today_outlined,
+            const Icon(Icons.calendar_today_outlined,
                 size: 18, color: AppColors.textSecondary),
           ]),
         ),
@@ -297,7 +299,7 @@ class _RegisterStudentScreenState extends State<RegisterStudentScreen> {
       const SizedBox(height: 16),
 
       DropdownButtonFormField<String>(
-        value: _nivelAcademico,
+        initialValue: _nivelAcademico,
         decoration: _deco('Nivel académico', Icons.military_tech_outlined),
         items: _niveles.map((n) => DropdownMenuItem(value: n, child: Text(n))).toList(),
         onChanged: (v) => setState(() => _nivelAcademico = v!),
@@ -316,7 +318,7 @@ class _RegisterStudentScreenState extends State<RegisterStudentScreen> {
           hint: 'Ej: Python, Inglés, Excel'),
       const SizedBox(height: 24),
 
-      Text('Modalidad preferida', style: AppTextStyles.subtitle1),
+      const Text('Modalidad preferida', style: AppTextStyles.subtitle1),
       const SizedBox(height: 12),
       Wrap(spacing: 8, children: ['remoto','presencial','hibrido'].map((m) {
         final sel = _modalidad == m;

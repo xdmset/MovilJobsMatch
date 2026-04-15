@@ -113,8 +113,9 @@ class _EditVacancyScreenState extends State<EditVacancyScreen> {
       if (!_modalidades.contains(_modalidad)) _modalidad = 'presencial';
       if (!_monedas.contains(_moneda)) _moneda = 'MXN';
       if (!_estados.contains(_estado)) _estado = 'activa';
-      if (_tipoContrato != null && !_contratos.contains(_tipoContrato))
+      if (_tipoContrato != null && !_contratos.contains(_tipoContrato)) {
         _tipoContrato = null;
+      }
 
       _inicializado = true;
     });
@@ -126,8 +127,9 @@ class _EditVacancyScreenState extends State<EditVacancyScreen> {
     final val = double.tryParse(v.replaceAll(',', ''));
     if (val == null || val < 0) return 'Ingresa un monto válido';
     final maxV = double.tryParse(_sueldoMaxCtrl.text.replaceAll(',', ''));
-    if (maxV != null && val > maxV)
+    if (maxV != null && val > maxV) {
       return 'El mínimo no puede ser mayor al máximo';
+    }
     return null;
   }
 
@@ -136,8 +138,9 @@ class _EditVacancyScreenState extends State<EditVacancyScreen> {
     final val = double.tryParse(v.replaceAll(',', ''));
     if (val == null || val < 0) return 'Ingresa un monto válido';
     final minV = double.tryParse(_sueldoMinCtrl.text.replaceAll(',', ''));
-    if (minV != null && val < minV)
+    if (minV != null && val < minV) {
       return 'El máximo no puede ser menor al mínimo';
+    }
     return null;
   }
 
@@ -161,10 +164,12 @@ class _EditVacancyScreenState extends State<EditVacancyScreen> {
       'estado':      _estado,
     };
 
-    if (_requisitosCtrl.text.trim().isNotEmpty)
+    if (_requisitosCtrl.text.trim().isNotEmpty) {
       body['requisitos']  = _requisitosCtrl.text.trim();
-    if (_ubicacionCtrl.text.trim().isNotEmpty)
+    }
+    if (_ubicacionCtrl.text.trim().isNotEmpty) {
       body['ubicacion']   = _ubicacionCtrl.text.trim();
+    }
     if (minV != null) body['sueldo_minimo'] = minV;
     if (maxV != null) body['sueldo_maximo'] = maxV;
     if (minV != null || maxV != null) body['moneda'] = _moneda;
@@ -307,7 +312,7 @@ class _EditVacancyScreenState extends State<EditVacancyScreen> {
 
             // Tipo contrato
             DropdownButtonFormField<String>(
-              value: _tipoContrato,
+              initialValue: _tipoContrato,
               decoration: _deco('Tipo de contrato', Icons.badge_outlined, card),
               hint: const Text('Sin especificar'),
               dropdownColor: card,

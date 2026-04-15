@@ -86,19 +86,22 @@ class CompanyRepository {
   // ── Feed de candidatos ────────────────────────────────────────────────────
   // GET /swipes/empresa/{empresa_id}/candidatos?vacante_id={vacante_id}
   //
-  // FIX CRÍTICO: el backend devuelve TODOS los estudiantes con ya_dio_like
-  // tanto true como false. Filtramos en cliente solo los que ya_dio_like==true
-  // para mostrar únicamente los que realmente dieron like a esa vacante.
+  // FIX: cuando se pasa vacanteId solo consulta esa vacante.
+  // Sin vacanteId consulta todas las vacantes de la empresa.
   Future<List<Map<String, dynamic>>> getCandidatosFeed(
-      int empresaId, List<int> vacanteIds) async {
-    if (vacanteIds.isEmpty) {
+      int empresaId, List<int> vacanteIds, {int? vacanteId}) async {
+
+    // Si hay un filtro específico, solo consultar esa vacante
+    final idsAConsultar = vacanteId != null ? [vacanteId] : vacanteIds;
+
+    if (idsAConsultar.isEmpty) {
       debugPrint('[CompanyRepo] getCandidatosFeed: sin vacantes');
       return [];
     }
 
     try {
       final resultados = await Future.wait(
-        vacanteIds.map((id) => _getCandidatosPorVacante(empresaId, id)),
+        idsAConsultar.map((id) => _getCandidatosPorVacante(empresaId, id)),
       );
 
       // Aplanar — ya vienen filtrados por ya_dio_like=true
@@ -151,7 +154,6 @@ class CompanyRepository {
           n['ubicacion']             = perfil['ubicacion'];
           n['modalidad_preferida']   = perfil['modalidad_preferida'];
           n['foto_perfil_url']       = perfil['foto_perfil_url'];
-          // FIX: incluir cv_url y cv_tipo_archivo para poder abrirlos
           n['cv_url']                = perfil['cv_url'];
           n['cv_tipo_archivo']       = perfil['cv_tipo_archivo'];
           n['biografia']             = perfil['biografia'];
@@ -164,10 +166,10 @@ class CompanyRepository {
       // FIX: filtrar solo candidatos que realmente dieron like
       // El backend devuelve ya_dio_like=false para estudiantes que NO dieron like
       final conLike = normalizados.where((c) {
-        final yaDioLike = c['ya_dio_like'];
-        // Si el campo no existe asumir true para no perder datos
-        if (yaDioLike == null) return true;
-        return yaDioLike == true;
+        final likeRaw = c['ya_dio_like'] ?? c['le_dio_like'];
+        if (likeRaw == null) return true;
+        if (likeRaw is bool) return likeRaw;
+        return likeRaw.toString().toLowerCase() == 'true';
       }).toList();
 
       debugPrint('[CompanyRepo] candidatos vacante $vacanteId: '
@@ -188,14 +190,18 @@ class CompanyRepository {
     String? ubicacion,
   }) async {
     final query = <String, String>{};
-    if (estado?.isNotEmpty == true)
+    if (estado?.isNotEmpty == true) {
       query['estado'] = estado!;
-    if (institucionEducativa?.isNotEmpty == true)
+    }
+    if (institucionEducativa?.isNotEmpty == true) {
       query['institucion_educativa'] = institucionEducativa!;
-    if (nivelAcademico?.isNotEmpty == true)
+    }
+    if (nivelAcademico?.isNotEmpty == true) {
       query['nivel_academico'] = nivelAcademico!;
-    if (ubicacion?.isNotEmpty == true)
+    }
+    if (ubicacion?.isNotEmpty == true) {
       query['ubicacion'] = ubicacion!;
+    }
 
     final raw = await _api.get(
         '/postulaciones/empresa/$empresaId',
@@ -204,7 +210,40 @@ class CompanyRepository {
     final lista = raw is List ? raw : (raw['data'] as List? ?? []);
     debugPrint('[CompanyRepo] postulaciones: ${lista.length} '
         '(estado=${estado ?? "todas"})');
-    return lista.cast<Map<String, dynamic>>();
+
+    // FIX: Aplanar perfil_estudiante en postulaciones igual que en el feed,
+    // para que las tabs de matches/aceptados/rechazados muestren nombre, foto, etc.
+    final normalizadas = lista.cast<Map<String, dynamic>>().map((p) {
+      final n = Map<String, dynamic>.from(p);
+
+      // Normalizar estudiante_id
+      if (!n.containsKey('estudiante_id') && n.containsKey('usuario_id')) {
+        n['estudiante_id'] = n['usuario_id'];
+      }
+
+      // Aplanar perfil_estudiante si existe
+      final perfil = n['perfil_estudiante'];
+      if (perfil is Map<String, dynamic>) {
+        n['nombre_completo']       = perfil['nombre_completo'];
+        n['nivel_academico']       = perfil['nivel_academico'];
+        n['institucion_educativa'] = perfil['institucion_educativa'];
+        n['ubicacion']             = perfil['ubicacion'];
+        n['modalidad_preferida']   = perfil['modalidad_preferida'];
+        n['foto_perfil_url']       = perfil['foto_perfil_url'];
+        n['cv_url']                = perfil['cv_url'];
+        n['cv_tipo_archivo']       = perfil['cv_tipo_archivo'];
+        n['biografia']             = perfil['biografia'];
+        n['habilidades']           = perfil['habilidades'];
+        n['fecha_nacimiento']      = perfil['fecha_nacimiento'];
+      }
+
+      debugPrint('[CompanyRepo] postulacion id=${n['id']} '
+          'estado=${n['estado']} estudiante=${n['estudiante_id']} '
+          'vacante=${n['vacante_id']}');
+      return n;
+    }).toList();
+
+    return normalizadas;
   }
 
   // ── Swipe empresa → estudiante ────────────────────────────────────────────
@@ -230,6 +269,24 @@ class CompanyRepository {
       debugPrint('[CompanyRepo] swipeEstudiante error: $e');
       return null;
     }
+  }
+
+  // ── Retroalimentación ─────────────────────────────────────────────────────
+  // POST /retroalimentacion/
+  // body: { postulacion_id, campos_mejora, sugerencias_perfil? }
+  Future<void> crearRetroalimentacion({
+    required int postulacionId,
+    required String camposMejora,
+    String? sugerenciasPerfil,
+  }) async {
+    final body = <String, dynamic>{
+      'postulacion_id': postulacionId,
+      'campos_mejora':  camposMejora,
+      if (sugerenciasPerfil != null && sugerenciasPerfil.isNotEmpty)
+        'sugerencias_perfil': sugerenciasPerfil,
+    };
+    debugPrint('[CompanyRepo] POST /retroalimentacion/ body: $body');
+    await _api.post('/retroalimentacion/', body, auth: true);
   }
 
   // ── Cambiar estado postulación ────────────────────────────────────────────

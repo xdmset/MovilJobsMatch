@@ -137,7 +137,7 @@ void initState() {
               children: [
 
                 // ── Header ──────────────────────────────────────────────
-                Text('¡Bienvenido de vuelta!', style: AppTextStyles.h2),
+                const Text('¡Bienvenido de vuelta!', style: AppTextStyles.h2),
                 const SizedBox(height: 8),
                 Text(
                   'Elige cómo quieres ingresar e introduce tus credenciales.',
@@ -159,10 +159,12 @@ void initState() {
                   decoration: _deco('Correo electrónico',
                       Icons.email_outlined),
                   validator: (v) {
-                    if (v == null || v.trim().isEmpty)
+                    if (v == null || v.trim().isEmpty) {
                       return 'Ingresa tu correo';
-                    if (!v.contains('@') || !v.contains('.'))
+                    }
+                    if (!v.contains('@') || !v.contains('.')) {
                       return 'Correo no válido';
+                    }
                     return null;
                   },
                 ),
@@ -186,8 +188,9 @@ void initState() {
                     ),
                   ),
                   validator: (v) {
-                    if (v == null || v.isEmpty)
+                    if (v == null || v.isEmpty) {
                       return 'Ingresa tu contraseña';
+                    }
                     if (v.length < 6) return 'Mínimo 6 caracteres';
                     return null;
                   },

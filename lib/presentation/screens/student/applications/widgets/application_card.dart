@@ -92,7 +92,7 @@ class ApplicationCard extends StatelessWidget {
                 // Location and Date
                 Row(
                   children: [
-                    Icon(
+                    const Icon(
                       Icons.location_on_outlined,
                       size: 16,
                       color: AppColors.textTertiary,
@@ -109,7 +109,7 @@ class ApplicationCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 16),
-                    Icon(
+                    const Icon(
                       Icons.calendar_today_outlined,
                       size: 16,
                       color: AppColors.textTertiary,
@@ -142,7 +142,7 @@ class ApplicationCard extends StatelessWidget {
                     ),
                     child: Row(
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.feedback_outlined,
                           size: 16,
                           color: AppColors.accentRed,
