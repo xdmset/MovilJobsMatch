@@ -41,7 +41,7 @@ class _EditVacancyScreenState extends State<EditVacancyScreen> {
     'Servicio social', 'Por proyecto', 'Temporal', 'Freelance',
   ];
   static const _monedas = ['MXN', 'USD', 'EUR'];
-  static const _estados = ['activo', 'inactivo', 'pausado'];
+  static const _estados = ['activa', 'pausada', 'cerrada'];
 
   @override
   void initState() {
@@ -54,7 +54,7 @@ class _EditVacancyScreenState extends State<EditVacancyScreen> {
     _sueldoMaxCtrl   = TextEditingController();
     _modalidad       = 'presencial';
     _moneda          = 'MXN';
-    _estado          = 'activo';
+    _estado          = 'activa';
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _cargarVacante());
   }
@@ -106,13 +106,13 @@ class _EditVacancyScreenState extends State<EditVacancyScreen> {
 
       _modalidad     = v['modalidad']     as String? ?? 'presencial';
       _moneda        = v['moneda']        as String? ?? 'MXN';
-      _estado        = v['estado']        as String? ?? 'activo';
+      _estado        = v['estado']        as String? ?? 'activa';
       _tipoContrato  = v['tipo_contrato'] as String?;
 
       // Validar que los valores estén en las listas
       if (!_modalidades.contains(_modalidad)) _modalidad = 'presencial';
       if (!_monedas.contains(_moneda)) _moneda = 'MXN';
-      if (!_estados.contains(_estado)) _estado = 'activo';
+      if (!_estados.contains(_estado)) _estado = 'activa';
       if (_tipoContrato != null && !_contratos.contains(_tipoContrato))
         _tipoContrato = null;
 
@@ -503,26 +503,28 @@ class _EditVacancyScreenState extends State<EditVacancyScreen> {
 
   Color _estadoColor(String e) {
     switch (e) {
-      case 'activo':   return AppColors.accentGreen;
-      case 'inactivo': return AppColors.error;
-      case 'pausado':  return Colors.orange;
-      default:         return AppColors.primaryPurple;
+      case 'activa':  return AppColors.accentGreen;
+      case 'pausada': return Colors.orange;
+      case 'cerrada': return AppColors.error;
+      default:        return AppColors.primaryPurple;
     }
   }
 
   String _lEstado(String e) {
     switch (e) {
-      case 'activo': return 'Activa'; case 'inactivo': return 'Inactiva';
-      case 'pausado': return 'Pausada'; default: return e;
+      case 'activa':  return 'Activa';
+      case 'pausada': return 'Pausada';
+      case 'cerrada': return 'Cerrada';
+      default:        return e;
     }
   }
 
   String _estadoDesc(String e) {
     switch (e) {
-      case 'activo':   return 'Visible para todos los estudiantes';
-      case 'inactivo': return 'No visible — cerrada';
-      case 'pausado':  return 'Visible pero sin nuevas postulaciones';
-      default:         return '';
+      case 'activa':  return 'Visible para todos los estudiantes';
+      case 'pausada': return 'Visible pero sin nuevas postulaciones';
+      case 'cerrada': return 'Puesto cubierto — no visible';
+      default:        return '';
     }
   }
 }
