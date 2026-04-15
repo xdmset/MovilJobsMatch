@@ -15,6 +15,7 @@ class CompanyProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _vacantes        = [];
   List<Map<String, dynamic>> _postulaciones   = [];
   List<Map<String, dynamic>> _candidatosFeed  = [];
+  final Map<String, Map<String, dynamic>> _candidateSnapshots = {};
   String? _error;
   bool _accionando = false;
 
@@ -30,15 +31,35 @@ class CompanyProvider extends ChangeNotifier {
   // ── Getters derivados para métricas ───────────────────────────────────────
   int get totalCandidatos => _postulaciones.length + _candidatosFeed.length;
   int get pendientes  => _candidatosFeed.length;
-  int get matches     => _postulaciones.where((p) => p['estado'] == 'match').length;
-  int get aceptados   => _postulaciones.where((p) => p['estado'] == 'aceptado').length;
-  int get rechazados  => _postulaciones.where((p) => p['estado'] == 'rechazado').length;
+  int get matches     => _postulaciones.where((p) => _esMatch(p)).length;
+  int get aceptados   => _postulaciones.where((p) => _esAceptada(p)).length;
+  int get rechazados  => _postulaciones.where((p) => _esRechazada(p)).length;
 
   // Extrae IDs de vacantes activas para pasarlos al repo
   List<int> get _vacanteIds => _vacantes
       .map((v) => v['id'] as int?)
       .whereType<int>()
       .toList();
+
+  // ── Helpers de estado (espejo de candidates_screen) ───────────────────────
+  // El backend devuelve: "pendiente" | "aceptada" | "rechazada" | "entrevista"
+  // Localmente el provider puede marcar: "match" | "aceptado" | "rechazado"
+  bool _esMatch(Map<String, dynamic> post) {
+    final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
+    if (estado == 'match') return true;
+    final matchId = post['match_id'];
+    return matchId != null && matchId != 0 && estado == 'pendiente';
+  }
+
+  bool _esAceptada(Map<String, dynamic> post) {
+    final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
+    return estado == 'aceptada' || estado == 'aceptado';
+  }
+
+  bool _esRechazada(Map<String, dynamic> post) {
+    final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
+    return estado == 'rechazada' || estado == 'rechazado';
+  }
 
   // ── Cargar perfil ─────────────────────────────────────────────────────────
   Future<void> cargarPerfil(int userId) async {
@@ -64,7 +85,6 @@ class CompanyProvider extends ChangeNotifier {
       _vacantes = results[1] as List<Map<String, dynamic>>;
 
       // 2. Postulaciones y candidatos en paralelo
-      //    getCandidatosFeed necesita los IDs de vacantes (ya disponibles)
       final ids = _vacanteIds;
       debugPrint('[CompanyProvider] cargando candidatos para vacantes: $ids');
 
@@ -72,13 +92,17 @@ class CompanyProvider extends ChangeNotifier {
         _repo.getPostulaciones(userId),
         _repo.getCandidatosFeed(userId, ids),
       ]);
-      _postulaciones  = candidatosResults[0];
       _candidatosFeed = candidatosResults[1];
+      _guardarSnapshots(_candidatosFeed);
+      // FIX: postulaciones ya vienen normalizadas desde el repo;
+      // solo enriquecer con snapshot si faltan datos de perfil.
+      _postulaciones  = _enriquecerPostulaciones(candidatosResults[0]);
 
       _status = CompanyStatus.cargado;
       debugPrint('[CompanyProvider] Dashboard cargado: '
           '${_vacantes.length} vacantes, '
-          '${_postulaciones.length} postulaciones, '
+          '${_postulaciones.length} postulaciones '
+          '(matches=$matches aceptados=$aceptados rechazados=$rechazados), '
           '${_candidatosFeed.length} candidatos en feed');
     } on ApiException catch (e) {
       _error = e.message; _status = CompanyStatus.error;
@@ -91,18 +115,21 @@ class CompanyProvider extends ChangeNotifier {
   }
 
   // ── Recargar candidatos (postulaciones + feed) ────────────────────────────
-  Future<void> recargarCandidatos(int userId) async {
+  Future<void> recargarCandidatos(int userId, {int? vacanteId}) async {
     try {
       final ids = _vacanteIds;
       final results = await Future.wait([
         _repo.getPostulaciones(userId),
-        _repo.getCandidatosFeed(userId, ids),
+        _repo.getCandidatosFeed(userId, ids, vacanteId: vacanteId),
       ]);
-      _postulaciones  = results[0];
       _candidatosFeed = results[1];
+      _guardarSnapshots(_candidatosFeed);
+      _postulaciones  = _enriquecerPostulaciones(results[0]);
       debugPrint('[CompanyProvider] Candidatos recargados: '
-          '${_postulaciones.length} postulaciones, '
-          '${_candidatosFeed.length} en feed');
+          '${_postulaciones.length} postulaciones '
+          '(matches=$matches aceptados=$aceptados rechazados=$rechazados), '
+          '${_candidatosFeed.length} en feed'
+          '${vacanteId != null ? " (vacante $vacanteId)" : ""}');
       notifyListeners();
     } catch (e) {
       debugPrint('[CompanyProvider] recargarCandidatos: $e');
@@ -202,6 +229,20 @@ class CompanyProvider extends ChangeNotifier {
   }) async {
     _accionando = true; _error = null; notifyListeners();
     try {
+      final candidatoSnapshot = _candidatosFeed.cast<Map<String, dynamic>?>()
+          .firstWhere(
+            (c) {
+              if (c == null) return false;
+              return _normalizarInt(c['estudiante_id'] ?? c['usuario_id']) == estudianteId &&
+                  _normalizarInt(c['vacante_id']) == vacanteId;
+            },
+            orElse: () => null,
+          );
+      if (candidatoSnapshot != null) {
+        _candidateSnapshots[_candidateKey(estudianteId, vacanteId)] =
+            Map<String, dynamic>.from(candidatoSnapshot);
+      }
+
       final match = await _repo.swipeEstudiante(
         empresaId: empresaId, estudianteId: estudianteId,
         vacanteId: vacanteId, interes: interes,
@@ -209,21 +250,27 @@ class CompanyProvider extends ChangeNotifier {
 
       // Remover del feed de pendientes
       _candidatosFeed.removeWhere((c) {
-        final cEstId = c['estudiante_id'] as int? ?? c['usuario_id'] as int?;
-        final cVacId = c['vacante_id'] as int?;
+        final cEstId = _normalizarInt(c['estudiante_id'] ?? c['usuario_id']);
+        final cVacId = _normalizarInt(c['vacante_id']);
         return cEstId == estudianteId && cVacId == vacanteId;
       });
 
       // Agregar/actualizar en postulaciones para reflejo inmediato en tabs
-      final estadoLocal = match != null ? 'match' : (interes ? 'aceptado' : 'rechazado');
+      // FIX: usar estados que coincidan con los que el API devuelve para
+      // que _esMatch/_esAceptada/_esRechazada los reconozcan correctamente.
+      final estadoLocal = match != null ? 'match' : (interes ? 'aceptada' : 'rechazada');
       final idx = _postulaciones.indexWhere(
-          (p) => p['estudiante_id'] == estudianteId && p['vacante_id'] == vacanteId);
+          (p) => _normalizarInt(p['estudiante_id']) == estudianteId
+              && _normalizarInt(p['vacante_id']) == vacanteId);
       if (idx >= 0) {
         final updated = Map<String, dynamic>.from(_postulaciones[idx]);
         updated['estado'] = estadoLocal;
         _postulaciones[idx] = updated;
       } else {
+        final snapshot =
+            _candidateSnapshots[_candidateKey(estudianteId, vacanteId)] ?? const {};
         _postulaciones.insert(0, {
+          ...snapshot,
           'estudiante_id':  estudianteId,
           'vacante_id':     vacanteId,
           'empresa_id':     empresaId,
@@ -237,6 +284,27 @@ class CompanyProvider extends ChangeNotifier {
       return match != null;
     } catch (e) {
       _error = 'Error al procesar.'; _accionando = false; notifyListeners();
+      return false;
+    }
+  }
+
+  // ── Retroalimentación ─────────────────────────────────────────────────────
+  Future<bool> crearRetroalimentacion({
+    required int postulacionId,
+    required String camposMejora,
+    String? sugerenciasPerfil,
+  }) async {
+    try {
+      await _repo.crearRetroalimentacion(
+        postulacionId:    postulacionId,
+        camposMejora:     camposMejora,
+        sugerenciasPerfil: sugerenciasPerfil,
+      );
+      debugPrint('[CompanyProvider] retroalimentación enviada ✓ '
+          'postulacion=$postulacionId');
+      return true;
+    } catch (e) {
+      debugPrint('[CompanyProvider] crearRetroalimentacion error: $e');
       return false;
     }
   }
@@ -264,7 +332,52 @@ class CompanyProvider extends ChangeNotifier {
   void limpiar() {
     _status = CompanyStatus.inicial; _perfil = null;
     _vacantes = []; _postulaciones = []; _candidatosFeed = [];
+    _candidateSnapshots.clear();
     _error = null; _accionando = false;
     notifyListeners();
   }
+
+  void _guardarSnapshots(Iterable<Map<String, dynamic>> candidatos) {
+    for (final candidato in candidatos) {
+      final estudianteId =
+          _normalizarInt(candidato['estudiante_id'] ?? candidato['usuario_id']);
+      final vacanteId = _normalizarInt(candidato['vacante_id']);
+      if (estudianteId == null || vacanteId == null) continue;
+      _candidateSnapshots[_candidateKey(estudianteId, vacanteId)] =
+          Map<String, dynamic>.from(candidato);
+    }
+  }
+
+  // FIX: _enriquecerPostulaciones ya NO sobreescribe el 'estado' ni los
+  // datos de perfil que el repo ya aplana. El snapshot solo rellena
+  // campos que falten (p.ej. foto_perfil_url si el endpoint de postulaciones
+  // no trae perfil_estudiante), usando post como fuente de verdad.
+  List<Map<String, dynamic>> _enriquecerPostulaciones(
+      List<Map<String, dynamic>> postulaciones) {
+    return postulaciones.map((post) {
+      final estudianteId = _normalizarInt(post['estudiante_id']);
+      final vacanteId = _normalizarInt(post['vacante_id']);
+      if (estudianteId == null || vacanteId == null) {
+        return Map<String, dynamic>.from(post);
+      }
+
+      final snapshot = _candidateSnapshots[_candidateKey(estudianteId, vacanteId)];
+      if (snapshot == null) return Map<String, dynamic>.from(post);
+
+      // IMPORTANTE: post va DESPUÉS del snapshot para que sus valores
+      // (especialmente 'estado', 'id', 'match_id') tengan prioridad.
+      return {
+        ...snapshot,
+        ...post,
+      };
+    }).toList();
+  }
+
+  int? _normalizarInt(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  String _candidateKey(int estudianteId, int vacanteId) =>
+      '$estudianteId-$vacanteId';
 }

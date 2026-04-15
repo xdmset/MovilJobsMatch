@@ -155,7 +155,7 @@ class _RegisterCompanyScreenState extends State<RegisterCompanyScreen> {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Datos de acceso', style: AppTextStyles.h2),
+        const Text('Datos de acceso', style: AppTextStyles.h2),
         const SizedBox(height: 8),
         Text('Crea las credenciales de tu cuenta empresarial',
             style: AppTextStyles.bodyMedium.copyWith(
@@ -187,7 +187,7 @@ class _RegisterCompanyScreenState extends State<RegisterCompanyScreen> {
         const SizedBox(height: 24),
         _buildErrorBanner(),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Text('¿Ya tienes cuenta? ',
+          const Text('¿Ya tienes cuenta? ',
               style: AppTextStyles.bodyMedium),
           TextButton(
             onPressed: () => context.go(AppRoutes.login),
@@ -203,7 +203,7 @@ class _RegisterCompanyScreenState extends State<RegisterCompanyScreen> {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Perfil de la empresa', style: AppTextStyles.h2),
+        const Text('Perfil de la empresa', style: AppTextStyles.h2),
         const SizedBox(height: 8),
         Text('Esta información aparecerá en tu perfil público',
             style: AppTextStyles.bodyMedium.copyWith(
@@ -216,7 +216,7 @@ class _RegisterCompanyScreenState extends State<RegisterCompanyScreen> {
 
         // Sector — dropdown con fill adaptado al tema
         DropdownButtonFormField<String>(
-          value: _sector,
+          initialValue: _sector,
           decoration: InputDecoration(
             labelText: 'Sector',
             prefixIcon: const Icon(Icons.category_outlined,

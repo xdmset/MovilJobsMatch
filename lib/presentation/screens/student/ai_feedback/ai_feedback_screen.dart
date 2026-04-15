@@ -62,10 +62,12 @@ class _AIFeedbackScreenState extends State<AIFeedbackScreen> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _error = 'No se pudo generar el análisis: $e';
         _isAnalyzing = false;
       });
+      }
     }
   }
 
@@ -254,11 +256,11 @@ Responde SOLO con el análisis estructurado, sin introducción ni conclusión ad
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         Container(
           padding: const EdgeInsets.all(28),
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
               gradient: AppColors.purpleGradient, shape: BoxShape.circle),
           child: const Icon(Icons.auto_awesome, size: 56, color: Colors.white)),
         const SizedBox(height: 28),
-        Text('Analizando tu perfil...',
+        const Text('Analizando tu perfil...',
             style: AppTextStyles.h3, textAlign: TextAlign.center),
         const SizedBox(height: 12),
         Text(

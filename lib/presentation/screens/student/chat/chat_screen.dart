@@ -149,7 +149,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               width: 40,
               height: 40,
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: AppColors.primaryPurpleLight,
                 shape: BoxShape.circle,
               ),
@@ -244,7 +244,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       child: Row(
         children: [
-          Icon(
+          const Icon(
             Icons.info_outline,
             color: AppColors.accentBlue,
             size: 20,
@@ -278,14 +278,14 @@ class _ChatScreenState extends State<ChatScreen> {
                 color: AppColors.primaryPurpleLight.withOpacity(0.2),
                 shape: BoxShape.circle,
               ),
-              child: Icon(
+              child: const Icon(
                 Icons.chat_bubble_outline,
                 size: 50,
                 color: AppColors.primaryPurple,
               ),
             ),
             const SizedBox(height: 24),
-            Text(
+            const Text(
               'Start the conversation',
               style: AppTextStyles.h4,
             ),

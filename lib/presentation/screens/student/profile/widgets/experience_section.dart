@@ -32,7 +32,7 @@ class ExperienceSection extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Experience', style: AppTextStyles.h4),
+              const Text('Experience', style: AppTextStyles.h4),
               IconButton(
                 icon: const Icon(Icons.add, size: 20),
                 onPressed: () {

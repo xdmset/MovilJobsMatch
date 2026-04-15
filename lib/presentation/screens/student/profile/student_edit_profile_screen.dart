@@ -149,9 +149,11 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
     final xfile = await _picker.pickImage(source: source, imageQuality: 85);
     if (xfile == null || !mounted) return;
     final ok = await context.read<PerfilProvider>().subirFoto(id, File(xfile.path));
-    if (mounted) _snack(
+    if (mounted) {
+      _snack(
         ok ? 'Foto actualizada' : (context.read<PerfilProvider>().error ?? 'Error'),
         ok ? AppColors.accentGreen : AppColors.error);
+    }
   }
 
   Future<void> _eliminarFoto() async {
@@ -167,9 +169,11 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
     if (result == null || result.files.single.path == null || !mounted) return;
     final ok = await context.read<PerfilProvider>().subirCv(
         id, File(result.files.single.path!));
-    if (mounted) _snack(
+    if (mounted) {
+      _snack(
         ok ? 'CV subido correctamente' : (context.read<PerfilProvider>().error ?? 'Error'),
         ok ? AppColors.accentGreen : AppColors.error);
+    }
   }
 
   Future<void> _eliminarCv() async {
@@ -216,7 +220,7 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
               margin: const EdgeInsets.only(bottom: 16), padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(color: AppColors.error.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12)),
-              child: Text(p.error!, style: TextStyle(color: AppColors.error)));
+              child: Text(p.error!, style: const TextStyle(color: AppColors.error)));
           }),
 
           _sec('Foto de perfil'), const SizedBox(height: 16),
@@ -254,7 +258,7 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
                       color: _fechaNacimiento != null
                           ? AppColors.textPrimary : AppColors.textTertiary,
                     ))),
-                Icon(Icons.calendar_today_outlined,
+                const Icon(Icons.calendar_today_outlined,
                     size: 16, color: AppColors.textSecondary),
               ]),
             ),
@@ -274,7 +278,7 @@ class _StudentEditProfileScreenState extends State<StudentEditProfileScreen> {
               validator: (v) => v == null || v.trim().isEmpty ? 'Requerido' : null),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
-            value: _nivelAcademico,
+            initialValue: _nivelAcademico,
             decoration: _deco('Nivel académico', Icons.military_tech_outlined, cardColor),
             items: _niveles.map((n) => DropdownMenuItem(value: n, child: Text(n))).toList(),
             onChanged: (v) => setState(() => _nivelAcademico = v!),

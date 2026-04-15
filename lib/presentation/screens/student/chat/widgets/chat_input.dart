@@ -62,7 +62,7 @@ class _ChatInputState extends State<ChatInput> {
           children: [
             // Attach button
             Container(
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: AppColors.surfaceGray,
                 shape: BoxShape.circle,
               ),

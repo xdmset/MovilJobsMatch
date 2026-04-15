@@ -60,8 +60,9 @@ class _CreateVacancyScreenState extends State<CreateVacancyScreen> {
     final val = double.tryParse(v.replaceAll(',', ''));
     if (val == null || val < 0) return 'Ingresa un monto válido (mayor a 0)';
     final maxV = double.tryParse(_sueldoMaxCtrl.text.replaceAll(',', ''));
-    if (maxV != null && val > maxV)
+    if (maxV != null && val > maxV) {
       return 'El mínimo (\$$val) no puede ser mayor al máximo (\$$maxV)';
+    }
     return null;
   }
 
@@ -70,8 +71,9 @@ class _CreateVacancyScreenState extends State<CreateVacancyScreen> {
     final val = double.tryParse(v.replaceAll(',', ''));
     if (val == null || val < 0) return 'Ingresa un monto válido (mayor a 0)';
     final minV = double.tryParse(_sueldoMinCtrl.text.replaceAll(',', ''));
-    if (minV != null && val < minV)
+    if (minV != null && val < minV) {
       return 'El máximo (\$$val) no puede ser menor al mínimo (\$$minV)';
+    }
     return null;
   }
 
@@ -195,10 +197,12 @@ class _CreateVacancyScreenState extends State<CreateVacancyScreen> {
               decoration: _deco('Título del puesto *', Icons.title, card)
                   .copyWith(hintText: 'Ej: Desarrollador Flutter Jr.'),
               validator: (v) {
-                if (v == null || v.trim().isEmpty)
+                if (v == null || v.trim().isEmpty) {
                   return 'El título del puesto es obligatorio';
-                if (v.trim().length < 3)
+                }
+                if (v.trim().length < 3) {
                   return 'El título debe tener al menos 3 caracteres';
+                }
                 return null;
               },
             ),
@@ -215,10 +219,12 @@ class _CreateVacancyScreenState extends State<CreateVacancyScreen> {
                     alignLabelWithHint: true,
                   ),
               validator: (v) {
-                if (v == null || v.trim().isEmpty)
+                if (v == null || v.trim().isEmpty) {
                   return 'La descripción es obligatoria';
-                if (v.trim().length < 20)
+                }
+                if (v.trim().length < 20) {
                   return 'Describe mejor el puesto (mínimo 20 caracteres)';
+                }
                 return null;
               },
             ),
@@ -266,7 +272,7 @@ class _CreateVacancyScreenState extends State<CreateVacancyScreen> {
                     fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
-              value: _tipoContrato,
+              initialValue: _tipoContrato,
               decoration: _deco('Selecciona el tipo', Icons.badge_outlined, card),
               hint: const Text('Sin especificar'),
               dropdownColor: card,

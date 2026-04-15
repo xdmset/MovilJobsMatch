@@ -22,7 +22,7 @@ class StudentHomeScreen extends StatelessWidget {
         title: Consumer<StudentProvider>(builder: (_, p, __) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Explorar vacantes', style: AppTextStyles.h4),
+            const Text('Explorar vacantes', style: AppTextStyles.h4),
             Text(
               p.esPremium
                   ? 'Premium Ilimitado ✨'
@@ -74,8 +74,9 @@ class StudentHomeScreen extends StatelessWidget {
         ],
       ),
       body: Consumer<StudentProvider>(builder: (context, p, _) {
-        if (p.cargandoVacantes && p.vacantes.isEmpty)
+        if (p.cargandoVacantes && p.vacantes.isEmpty) {
           return const Center(child: CircularProgressIndicator());
+        }
         if (p.hasReachedLimit) return _buildLimitReached(context);
         if (p.vacantes.isEmpty) return _buildEmpty(context, p);
         if (p.currentVacancy == null) return _buildAllSeen(context, p);
@@ -201,7 +202,7 @@ class StudentHomeScreen extends StatelessWidget {
       showDialog(context: context, builder: (_) => AlertDialog(
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(gradient: AppColors.purpleGradient,
+            decoration: const BoxDecoration(gradient: AppColors.purpleGradient,
                 shape: BoxShape.circle),
             child: const Icon(Icons.favorite, color: Colors.white, size: 48)),
           const SizedBox(height: 16),
@@ -251,7 +252,7 @@ class StudentHomeScreen extends StatelessWidget {
     child: SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.work_off_outlined, size: 72, color: AppColors.textTertiary),
+        const Icon(Icons.work_off_outlined, size: 72, color: AppColors.textTertiary),
         const SizedBox(height: 16),
         Text('Sin vacantes disponibles', style: AppTextStyles.h4.copyWith(
             color: AppColors.textSecondary), textAlign: TextAlign.center),
@@ -280,11 +281,11 @@ class StudentHomeScreen extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Container(padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(gradient: AppColors.purpleGradient,
+            decoration: const BoxDecoration(gradient: AppColors.purpleGradient,
                 shape: BoxShape.circle),
             child: const Icon(Icons.lock_outline, size: 60, color: Colors.white)),
         const SizedBox(height: 24),
-        Text('Límite diario alcanzado', style: AppTextStyles.h3,
+        const Text('Límite diario alcanzado', style: AppTextStyles.h3,
             textAlign: TextAlign.center),
         const SizedBox(height: 12),
         Text('Vuelve mañana para seguir explorando, o mejora a Premium para swipes ilimitados.',
@@ -307,7 +308,7 @@ class StudentHomeScreen extends StatelessWidget {
     child: SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.check_circle_outline, size: 72, color: AppColors.accentGreen),
+        const Icon(Icons.check_circle_outline, size: 72, color: AppColors.accentGreen),
         const SizedBox(height: 16),
         Text('¡Revisaste todas las vacantes!',
             style: AppTextStyles.h4.copyWith(color: AppColors.textSecondary),
@@ -392,7 +393,7 @@ class StudentHomeScreen extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Filtrar vacantes', style: AppTextStyles.h4),
+                  const Text('Filtrar vacantes', style: AppTextStyles.h4),
                   TextButton(
                     onPressed: () => setModal(() {
                       modalidadTemp = null; ubicacionTemp = null;
@@ -681,9 +682,9 @@ class _SwipeCardState extends State<_SwipeCard> {
     final empresaUbic     = v['empresa_ubicacion']  as String?;
 
     String salario = '';
-    if (minS != null && maxS != null)
+    if (minS != null && maxS != null) {
       salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda/mes';
-    else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda/mes';
+    } else if (minS != null) salario = 'Desde \$${_fmt(minS)} $moneda/mes';
     else if (maxS != null) salario = 'Hasta \$${_fmt(maxS)} $moneda/mes';
 
     return Container(

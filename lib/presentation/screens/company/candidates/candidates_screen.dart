@@ -1,4 +1,4 @@
-// lib/presentation/screens/company/candidates/candidates_screen.dart
+﻿// lib/presentation/screens/company/candidates/candidates_screen.dart
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -25,16 +25,15 @@ class _CandidatesScreenState extends State<CandidatesScreen>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 4, vsync: this);
-    // Escuchar cambios en el filtro de vacante
+    _tabs = TabController(length: 3, vsync: this);  // Cambiar de 4 a 3 tabs
     widget.notifier.vacanteIdFiltro.addListener(_onFiltroChanged);
   }
 
   void _onFiltroChanged() {
-    // Cuando cambia el filtro, ir al tab "Por revisar"
     if (mounted) {
       _tabs.animateTo(0);
       setState(() {});
+      _recargar();
     }
   }
 
@@ -48,8 +47,69 @@ class _CandidatesScreenState extends State<CandidatesScreen>
   Future<void> _recargar() async {
     final id = context.read<AuthProvider>().usuario?.id;
     if (id != null) {
-      await context.read<CompanyProvider>().recargarCandidatos(id);
+      final vacanteIdFiltro = widget.notifier.vacanteIdFiltro.value;
+      await context.read<CompanyProvider>()
+          .recargarCandidatos(id, vacanteId: vacanteIdFiltro);
     }
+  }
+
+  // ── Normalización de tipos ─────────────────────────────────────────────────
+  // El JSON puede deserializar los IDs como int o String dependiendo del endpoint.
+  // Siempre comparar como int para evitar mismatch.
+  int? _toInt(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  bool _matchesVacante(Map<String, dynamic> item, int? vacanteIdFiltro) {
+    if (vacanteIdFiltro == null) return true;
+    return _toInt(item['vacante_id']) == vacanteIdFiltro;
+  }
+
+  List<Map<String, dynamic>> _filtrarPorVacante(
+    Iterable<Map<String, dynamic>> items,
+    int? vacanteIdFiltro,
+  ) {
+    return items.where((item) => _matchesVacante(item, vacanteIdFiltro)).toList();
+  }
+
+  // ── BUG 1 FIX: estados del API ─────────────────────────────────────────────
+  // El backend devuelve: "pendiente" | "aceptada" | "rechazada" | "entrevista"
+  // Los matches son postulaciones con estado "pendiente" que además tienen match_id != null,
+  // o bien el provider los marca de otra forma — usar los estados reales del API.
+  //
+  // Regla:
+  //   Matches      → estado == "pendiente" y match_id != null  (o como los marque el provider)
+  //   Aceptados    → estado == "aceptada"   (CON 'a' al final)
+  //   Rechazados   → estado == "rechazada"  (CON 'a' al final)
+  //
+  // Si el provider ya normaliza a "match" / "aceptado" / "rechazado" (sin 'a'),
+  // se cubre con _esEstado() que acepta ambas formas.
+  bool _esEstado(Map<String, dynamic> post, String estadoBuscado) {
+    final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
+    // Aceptar tanto "aceptada"/"aceptado", "rechazada"/"rechazado", "match", etc.
+    return estado == estadoBuscado ||
+        estado == '${estadoBuscado}a' || // masculino → femenino
+        estado == estadoBuscado.replaceAll('a', ''); // femenino → masculino
+  }
+
+  bool _esMatch(Map<String, dynamic> post) {
+    // "match" puede ser un estado propio del provider, o bien
+    // postulación pendiente con match_id no nulo.
+    final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
+    if (estado == 'match') return true;
+    final matchId = post['match_id'];
+    return matchId != null && matchId != 0 && estado == 'pendiente';
+  }
+
+  bool _esAceptada(Map<String, dynamic> post) {
+    final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
+    return estado == 'aceptada' || estado == 'aceptado';
+  }
+
+  bool _esRechazada(Map<String, dynamic> post) {
+    final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
+    return estado == 'rechazada' || estado == 'rechazado';
   }
 
   @override
@@ -60,42 +120,36 @@ class _CandidatesScreenState extends State<CandidatesScreen>
         return ValueListenableBuilder<String?>(
           valueListenable: widget.notifier.vacanteTituloFiltro,
           builder: (_, vacanteTitulo, __) {
-            final tieneFiltre = vacanteIdFiltro != null;
+            final tieneFiltro = vacanteIdFiltro != null;
 
             return Scaffold(
               appBar: AppBar(
                 automaticallyImplyLeading: false,
                 title: Consumer<CompanyProvider>(builder: (_, p, __) {
-                  // Candidatos visibles según el filtro
-                  final feedFiltrado = tieneFiltre
-                      ? p.candidatosFeed
-                          .where((c) {
-                            final cVacId = c['vacante_id'];
-                            final cVacInt = cVacId is int
-                                ? cVacId
-                                : int.tryParse(cVacId?.toString() ?? '');
-                            return cVacInt == vacanteIdFiltro;
-                          })
-                          .toList()
-                      : p.candidatosFeed;
+                  final feedFiltrado = _filtrarPorVacante(
+                    p.candidatosFeed,
+                    vacanteIdFiltro,
+                  );
+                  final favoritosFiltrado = _filtrarPorVacante(
+                    p.postulaciones.where((post) => _esMatch(post) || _esAceptada(post)),
+                    vacanteIdFiltro,
+                  );
 
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(tieneFiltre
-                          ? 'Candidatos: ${vacanteTitulo ?? ''}'
-                          : 'Candidatos',
+                      const Text('Candidatos',
                           style: AppTextStyles.h4,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                       Text(
-                        '${feedFiltrado.length} por revisar · ${p.matches} matches',
+                        '${feedFiltrado.length} por revisar · ${favoritosFiltrado.length} favoritos',
                         style: AppTextStyles.bodySmall.copyWith(
                             color: AppColors.textTertiary)),
                     ],
                   );
                 }),
                 actions: [
-                  if (tieneFiltre)
+                  if (tieneFiltro)
                     TextButton.icon(
                       onPressed: () => widget.notifier.limpiarFiltro(),
                       icon: const Icon(Icons.clear, size: 16,
@@ -115,51 +169,48 @@ class _CandidatesScreenState extends State<CandidatesScreen>
                   tabAlignment: TabAlignment.start,
                   tabs: [
                     Consumer<CompanyProvider>(builder: (_, p, __) {
-                      final count = tieneFiltre
-                          ? p.candidatosFeed
-                              .where((c) {
-                                final cVacId = c['vacante_id'];
-                                final cVacInt = cVacId is int
-                                    ? cVacId
-                                    : int.tryParse(cVacId?.toString() ?? '');
-                                return cVacInt == vacanteIdFiltro;
-                              })
-                              .length
-                          : p.candidatosFeed.length;
+                      final count = _filtrarPorVacante(
+                        p.candidatosFeed,
+                        vacanteIdFiltro,
+                      ).length;
                       return Tab(text: 'Por revisar ($count)');
                     }),
-                    Consumer<CompanyProvider>(builder: (_, p, __) =>
-                        Tab(text: 'Matches (${p.matches})')),
-                    Consumer<CompanyProvider>(builder: (_, p, __) =>
-                        Tab(text: 'Aceptados (${p.aceptados})')),
-                    const Tab(text: 'Rechazados'),
+                    Consumer<CompanyProvider>(builder: (_, p, __) {
+                      final count = _filtrarPorVacante(
+                        p.postulaciones.where((post) => _esMatch(post) || _esAceptada(post)),
+                        vacanteIdFiltro,
+                      ).length;
+                      return Tab(text: 'Candidatos favoritos ($count)');
+                    }),
+                    Consumer<CompanyProvider>(builder: (_, p, __) {
+                      final count = _filtrarPorVacante(
+                        p.postulaciones.where(_esRechazada),
+                        vacanteIdFiltro,
+                      ).length;
+                      return Tab(text: 'Rechazados ($count)');
+                    }),
                   ],
                 ),
               ),
               body: Consumer<CompanyProvider>(builder: (_, p, __) {
-                if (p.cargando && p.postulaciones.isEmpty && p.candidatosFeed.isEmpty)
+                if (p.cargando && p.postulaciones.isEmpty && p.candidatosFeed.isEmpty) {
                   return const Center(child: CircularProgressIndicator());
+                }
 
-                // Aplicar filtro de vacante al feed
-                // FIX: normalizar comparación como int para evitar mismatch String/int
-                final feedFiltrado = tieneFiltre
-                    ? p.candidatosFeed
-                        .where((c) {
-                          final cVacId = c['vacante_id'];
-                          final cVacInt = cVacId is int
-                              ? cVacId
-                              : int.tryParse(cVacId?.toString() ?? '');
-                          return cVacInt == vacanteIdFiltro;
-                        })
-                        .toList()
-                    : p.candidatosFeed;
+                final feedFiltrado = _filtrarPorVacante(
+                  p.candidatosFeed,
+                  vacanteIdFiltro,
+                );
 
-                final rechazados = p.postulaciones
-                    .where((c) => c['estado'] == 'rechazado').toList();
-                final aceptados  = p.postulaciones
-                    .where((c) => c['estado'] == 'aceptado').toList();
-                final matchesList = p.postulaciones
-                    .where((c) => c['estado'] == 'match').toList();
+                final rechazados = _filtrarPorVacante(
+                  p.postulaciones.where(_esRechazada),
+                  vacanteIdFiltro,
+                );
+
+                final favoritosFiltrado = _filtrarPorVacante(
+                  p.postulaciones.where((post) => _esMatch(post) || _esAceptada(post)),
+                  vacanteIdFiltro,
+                );
 
                 return RefreshIndicator(
                   onRefresh: _recargar,
@@ -167,9 +218,7 @@ class _CandidatesScreenState extends State<CandidatesScreen>
                     controller: _tabs,
                     children: [
                       _buildFeedTab(context, feedFiltrado, p),
-                      _buildPostulacionesTab(context, matchesList, p,
-                          esMatch: true),
-                      _buildPostulacionesTab(context, aceptados, p),
+                      _buildPostulacionesTab(context, favoritosFiltrado, p),
                       _buildPostulacionesTab(context, rechazados, p,
                           esRechazado: true),
                     ],
@@ -228,7 +277,6 @@ class _CandidatesScreenState extends State<CandidatesScreen>
               blurRadius: 10, offset: const Offset(0, 2))],
         ),
         child: Column(children: [
-          // Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
@@ -334,40 +382,49 @@ class _CandidatesScreenState extends State<CandidatesScreen>
   Widget _buildPostulacionCard(BuildContext context,
       Map<String, dynamic> post, CompanyProvider p,
       {bool esMatch = false, bool esRechazado = false}) {
-    final estudianteId = post['estudiante_id'] as int? ?? 0;
-    final vacanteId    = post['vacante_id']    as int? ?? 0;
-    final estado       = post['estado']        as String? ?? '';
+    final estudianteId = _toInt(post['estudiante_id']) ?? 0;
+    final vacanteId    = _toInt(post['vacante_id']) ?? 0;
+    final estado       = post['estado'] as String? ?? '';
     final fechaStr     = post['fecha_creacion'] as String? ?? '';
 
     final vacante    = p.vacantes.firstWhere(
         (v) => v['id'] == vacanteId, orElse: () => {});
     final tituloV    = vacante['titulo'] as String? ?? 'Vacante #$vacanteId';
 
-    // Buscar datos del candidato en el feed para mostrar nombre/foto
     final candidatoData = p.candidatosFeed.firstWhere(
-        (c) => (c['estudiante_id'] ?? c['usuario_id']) == estudianteId,
+        (c) => _toInt(c['estudiante_id'] ?? c['usuario_id']) == estudianteId &&
+            _toInt(c['vacante_id']) == vacanteId,
         orElse: () => {});
-    final nombre  = candidatoData['nombre_completo'] as String?;
-    final fotoUrl = candidatoData['foto_perfil_url'] as String?;
+    final nombre  = post['nombre_completo'] as String?
+        ?? candidatoData['nombre_completo'] as String?;
+    final fotoUrl = post['foto_perfil_url'] as String?
+        ?? candidatoData['foto_perfil_url'] as String?;
     final inicial = nombre != null && nombre.isNotEmpty
         ? nombre[0].toUpperCase() : 'E';
 
+    // BUG 1 FIX: determinar color/icono/label del header usando los estados
+    // reales del API ("aceptada", "rechazada") en vez de los incorrectos
     Color headerColor = AppColors.textSecondary;
     IconData headerIcon = Icons.pending_outlined;
     String headerLabel = 'Pendiente';
 
-    if (estado == 'match') {
+    final estadoNorm = estado.toLowerCase().trim();
+    if (_esMatch(post)) {
       headerColor = AppColors.accentGreen;
       headerIcon  = Icons.favorite;
       headerLabel = '¡Match!';
-    } else if (estado == 'aceptado') {
+    } else if (estadoNorm == 'aceptada' || estadoNorm == 'aceptado') {
       headerColor = AppColors.accentBlue;
       headerIcon  = Icons.check_circle;
       headerLabel = 'Aceptado';
-    } else if (estado == 'rechazado') {
+    } else if (estadoNorm == 'rechazada' || estadoNorm == 'rechazado') {
       headerColor = AppColors.error;
       headerIcon  = Icons.cancel;
       headerLabel = 'Rechazado';
+    } else if (estadoNorm == 'entrevista') {
+      headerColor = AppColors.accentOrange;
+      headerIcon  = Icons.event_outlined;
+      headerLabel = 'Entrevista';
     }
 
     return Container(
@@ -394,7 +451,6 @@ class _CandidatesScreenState extends State<CandidatesScreen>
             Text(headerLabel, style: AppTextStyles.bodySmall.copyWith(
                 color: headerColor, fontWeight: FontWeight.bold)),
             const Spacer(),
-            // Mostrar vacante en cada postulación
             Flexible(child: Text(tituloV,
                 style: AppTextStyles.bodySmall.copyWith(
                     color: AppColors.textTertiary),
@@ -438,8 +494,6 @@ class _CandidatesScreenState extends State<CandidatesScreen>
   // ── Perfil completo del candidato ─────────────────────────────────────────
   void _mostrarPerfil(BuildContext context,
       Map<String, dynamic> candidato, CompanyProvider p) {
-    // empresaId obtenido de auth.usuario?.id ?? 0
-
     final estudianteId = candidato['estudiante_id'] as int?
         ?? candidato['usuario_id'] as int? ?? 0;
     final vacanteId    = candidato['vacante_id']    as int? ?? 0;
@@ -480,7 +534,6 @@ class _CandidatesScreenState extends State<CandidatesScreen>
                     color: AppColors.borderLight,
                     borderRadius: BorderRadius.circular(2))),
 
-            // Header
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
               child: Row(children: [
@@ -514,7 +567,6 @@ class _CandidatesScreenState extends State<CandidatesScreen>
               ]),
             ),
 
-            // Vacante
             Container(
               margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
               padding: const EdgeInsets.all(10),
@@ -663,18 +715,22 @@ class _CandidatesScreenState extends State<CandidatesScreen>
       empresaId: userId, estudianteId: estudianteId,
       vacanteId: vacanteId, interes: true,
     );
+    
+    // FIX: Recargar candidatos para sincronizar likes/matches con el servidor
+    await p.recargarCandidatos(userId);
+    
     if (!context.mounted) return;
     if (esMatch) {
       showDialog(context: context, builder: (_) => AlertDialog(
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                   gradient: AppColors.purpleGradient,
                   shape: BoxShape.circle),
               child: const Icon(Icons.favorite,
                   color: Colors.white, size: 44)),
           const SizedBox(height: 14),
-          Text('¡Es un Match! 🎉', style: AppTextStyles.h3,
+          const Text('¡Es un Match! 🎉', style: AppTextStyles.h3,
               textAlign: TextAlign.center),
           const SizedBox(height: 8),
           Text('${nombre ?? 'El candidato'} también te eligió.',
@@ -694,48 +750,26 @@ class _CandidatesScreenState extends State<CandidatesScreen>
     }
   }
 
+  // ── Rechazar — abre el sheet de retroalimentación ─────────────────────────
   Future<void> _rechazar(BuildContext context, CompanyProvider p, {
     required int estudianteId, required int vacanteId, String? nombre,
   }) async {
-    final ok = await showDialog<bool>(context: context, builder: (_) =>
-      AlertDialog(
-        title: const Text('¿Rechazar candidato?'),
-        content: Text(
-            '${nombre != null ? '"$nombre"' : 'Este candidato'} '
-            'será notificado que no fue seleccionado.'),
-        actions: [
-          SizedBox(width: double.infinity, child: OutlinedButton(
-            onPressed: () => Navigator.pop(context, false),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              side: const BorderSide(color: AppColors.primaryPurple),
-              foregroundColor: AppColors.primaryPurple,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-            child: const Text('Cancelar'),
-          )),
-          const SizedBox(height: 8),
-          SizedBox(width: double.infinity, child: ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-            child: const Text('Rechazar'),
-          )),
-        ],
+    final userId = context.read<AuthProvider>().usuario?.id ?? 0;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _RetroalimentacionSheet(
+        estudianteId: estudianteId,
+        vacanteId:    vacanteId,
+        nombre:       nombre,
+        provider:     p,
+        userId:       userId,
+        onRechazado:  (msg) {
+          if (context.mounted) _snack(context, msg, AppColors.error);
+        },
       ),
     );
-    if (ok != true || !context.mounted) return;
-    final userId = context.read<AuthProvider>().usuario?.id ?? 0;
-    await p.swipeEstudiante(
-      empresaId: userId, estudianteId: estudianteId,
-      vacanteId: vacanteId, interes: false,
-    );
-    if (context.mounted) _snack(context, 'Candidato rechazado', AppColors.error);
   }
 
   void _snack(BuildContext ctx, String msg, Color color) =>
@@ -813,5 +847,287 @@ class _CandidatesScreenState extends State<CandidatesScreen>
       case 'hibrido':    return 'Híbrido';
       default:           return m;
     }
+  }
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Sheet de retroalimentación — BUG 2 FIX
+// ══════════════════════════════════════════════════════════════════════════════
+class _RetroalimentacionSheet extends StatefulWidget {
+  final int estudianteId;
+  final int vacanteId;
+  final String? nombre;
+  final CompanyProvider provider;
+  final int userId;
+  final void Function(String mensaje) onRechazado;
+
+  const _RetroalimentacionSheet({
+    required this.estudianteId,
+    required this.vacanteId,
+    required this.nombre,
+    required this.provider,
+    required this.userId,
+    required this.onRechazado,
+  });
+
+  @override
+  State<_RetroalimentacionSheet> createState() =>
+      _RetroalimentacionSheetState();
+}
+
+class _RetroalimentacionSheetState extends State<_RetroalimentacionSheet> {
+  final _camposCtrl      = TextEditingController();
+  final _sugerenciasCtrl = TextEditingController();
+  final _formKey         = GlobalKey<FormState>();
+  bool  _enviando        = false;
+
+  @override
+  void dispose() {
+    _camposCtrl.dispose();
+    _sugerenciasCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _enviar() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _enviando = true);
+
+    final p = widget.provider;
+
+    // 1. Swipe negativo (rechazar en el feed de swipes)
+    await p.swipeEstudiante(
+      empresaId:    widget.userId,
+      estudianteId: widget.estudianteId,
+      vacanteId:    widget.vacanteId,
+      interes:      false,
+    );
+
+    // 2. Recargar postulaciones para tener el id de postulación actualizado
+    await p.recargarPostulaciones(widget.userId);
+
+    // BUG 2 FIX: comparar con _toInt() para evitar mismatch int/String,
+    // y buscar por cualquier estado (no solo rechazada) ya que puede ser
+    // que el swipe negativo cree la postulación pero no la marque como
+    // rechazada todavía desde el backend.
+    final postulacion = p.postulaciones.firstWhere(
+      (post) =>
+          _toInt(post['estudiante_id']) == widget.estudianteId &&
+          _toInt(post['vacante_id'])    == widget.vacanteId,
+      orElse: () => {},
+    );
+
+    if (postulacion.isNotEmpty) {
+      final postId = _toInt(postulacion['id']);
+      debugPrint('[RetroSheet] postulacion encontrada id=$postId '
+          'estado=${postulacion['estado']}');
+
+      if (postId != null) {
+        await p.crearRetroalimentacion(
+          postulacionId:     postId,
+          camposMejora:      _camposCtrl.text.trim(),
+          sugerenciasPerfil: _sugerenciasCtrl.text.trim().isEmpty
+              ? null
+              : _sugerenciasCtrl.text.trim(),
+        );
+      }
+    } else {
+      // La postulación no existe aún: el swipe negativo puede no crearla
+      // si el estudiante nunca tuvo una postulación formal.
+      // En ese caso, registrar solo el swipe es suficiente.
+      debugPrint('[RetroSheet] No se encontró postulación para '
+          'estudiante=${widget.estudianteId} vacante=${widget.vacanteId} '
+          '— el rechazo se registró solo vía swipe.');
+    }
+
+    // FIX: Recargar candidatos para sincronizar cambios con el servidor
+    await p.recargarCandidatos(widget.userId);
+
+    if (!mounted) return;
+
+    Navigator.pop(context);
+    widget.onRechazado('Candidato rechazado ✓');
+  }
+
+  // Helper local (igual que en el screen padre)
+  int? _toInt(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Handle
+                Center(child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(
+                      color: AppColors.borderLight,
+                      borderRadius: BorderRadius.circular(2)),
+                )),
+                const SizedBox(height: 18),
+
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: AppColors.error.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.feedback_outlined,
+                        color: AppColors.error, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Retroalimentación al candidato',
+                        style: AppTextStyles.h4.copyWith(
+                            fontWeight: FontWeight.bold)),
+                    Text(widget.nombre ?? 'Candidato',
+                        style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.textSecondary)),
+                  ])),
+                ]),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                      color: AppColors.error.withOpacity(0.06),
+                      borderRadius: BorderRadius.circular(8)),
+                  child: Text(
+                    'Esta información le llegará al estudiante para '
+                    'que sepa en qué puede mejorar su perfil.',
+                    style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.error.withOpacity(0.8)),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                Text('Áreas de mejora *',
+                    style: AppTextStyles.subtitle1.copyWith(
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _camposCtrl,
+                  maxLines: 3,
+                  maxLength: 300,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    hintText:
+                        'Ej: SQL avanzado, Docker, experiencia en equipos ágiles...',
+                    filled: true,
+                    fillColor: AppColors.primaryPurple.withOpacity(0.03),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide:
+                            const BorderSide(color: AppColors.borderLight)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                            color: AppColors.primaryPurple, width: 2)),
+                    errorBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                            color: AppColors.error, width: 1.5)),
+                  ),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) {
+                      return 'Indica al menos un área de mejora';
+                    }
+                    if (v.trim().length < 10) {
+                      return 'Sé más específico (mínimo 10 caracteres)';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+
+                Text('Sugerencias para su perfil',
+                    style: AppTextStyles.subtitle1.copyWith(
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                Text('Opcional — consejos para mejorar su perfil o CV',
+                    style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textTertiary)),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _sugerenciasCtrl,
+                  maxLines: 3,
+                  maxLength: 300,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    hintText:
+                        'Ej: Mejora tu portfolio con proyectos reales, '
+                        'agrega más detalle a tu experiencia...',
+                    filled: true,
+                    fillColor: AppColors.primaryPurple.withOpacity(0.03),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide:
+                            const BorderSide(color: AppColors.borderLight)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                            color: AppColors.primaryPurple, width: 2)),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                Row(children: [
+                  Expanded(child: OutlinedButton(
+                    onPressed: _enviando ? null : () => Navigator.pop(context),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      side: const BorderSide(color: AppColors.primaryPurple),
+                      foregroundColor: AppColors.primaryPurple,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Cancelar'),
+                  )),
+                  const SizedBox(width: 12),
+                  Expanded(child: ElevatedButton.icon(
+                    onPressed: _enviando ? null : _enviar,
+                    icon: _enviando
+                        ? const SizedBox(
+                            width: 16, height: 16,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.send_outlined, size: 16),
+                    label: Text(_enviando ? 'Enviando...' : 'Rechazar y enviar'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.error,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  )),
+                ]),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

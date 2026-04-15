@@ -112,7 +112,7 @@ class _VacanciesListScreenState extends State<VacanciesListScreen> {
                 padding: const EdgeInsets.all(32),
                 child: Column(
                     mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(Icons.search_off, size: 64,
+                  const Icon(Icons.search_off, size: 64,
                       color: AppColors.textTertiary),
                   const SizedBox(height: 16),
                   Text('Sin vacantes "${_labelEstado(_filtroEstado!)}"',
@@ -141,7 +141,7 @@ class _VacanciesListScreenState extends State<VacanciesListScreen> {
   Widget _buildEmpty() => Center(child: Padding(
     padding: const EdgeInsets.all(32),
     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Icon(Icons.work_off_outlined, size: 80, color: AppColors.textTertiary),
+      const Icon(Icons.work_off_outlined, size: 80, color: AppColors.textTertiary),
       const SizedBox(height: 16),
       Text('Sin vacantes publicadas',
           style: AppTextStyles.h4.copyWith(color: AppColors.textSecondary)),
@@ -166,8 +166,9 @@ class _VacanciesListScreenState extends State<VacanciesListScreen> {
     final maxS   = v['sueldo_maximo'];
     final moneda = v['moneda'] as String? ?? 'MXN';
     String salario = '';
-    if (minS != null && maxS != null) salario = '\$$minS – \$$maxS $moneda';
-    else if (minS != null)            salario = 'Desde \$$minS $moneda';
+    if (minS != null && maxS != null) {
+      salario = '\$$minS – \$$maxS $moneda';
+    } else if (minS != null)            salario = 'Desde \$$minS $moneda';
 
     final totalLikes   = v['total_likes_estudiantes'] as int? ?? 0;
     final totalVistas  = v['total_visualizaciones']   as int? ?? 0;

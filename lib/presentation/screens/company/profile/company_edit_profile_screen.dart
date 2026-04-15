@@ -242,7 +242,7 @@ class _CompanyEditProfileScreenState extends State<CompanyEditProfileScreen> {
 
           // Sector
           DropdownButtonFormField<String>(
-            value: _sector,
+            initialValue: _sector,
             decoration: _deco('Sector / Industria', Icons.category_outlined, card),
             hint: const Text('Selecciona el sector'),
             dropdownColor: card,
@@ -275,8 +275,9 @@ class _CompanyEditProfileScreenState extends State<CompanyEditProfileScreen> {
             validator: (v) {
               if (v == null || v.trim().isEmpty) return null;
               final u = v.trim();
-              if (!u.startsWith('http://') && !u.startsWith('https://'))
+              if (!u.startsWith('http://') && !u.startsWith('https://')) {
                 return 'Debe empezar con http:// o https://';
+              }
               return null;
             },
           ),
