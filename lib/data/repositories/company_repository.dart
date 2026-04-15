@@ -35,8 +35,7 @@ class CompanyRepository {
     if (ubicacionSede?.isNotEmpty == true) body['ubicacion_sede'] = ubicacionSede;
     debugPrint('[CompanyRepo] PUT /perfil_empresa/$userId body: $body');
     final raw = await _api.put('/perfil_empresa/$userId', body, auth: true);
-    return PerfilEmpresa.fromJson(
-        raw is Map<String, dynamic> ? raw : raw['data']);
+    return PerfilEmpresa.fromJson(raw);
   }
 
   // ── Vacantes ──────────────────────────────────────────────────────────────
@@ -51,20 +50,20 @@ class CompanyRepository {
 
   Future<Map<String, dynamic>> getVacante(int vacanteId) async {
     final raw = await _api.get('/vacante/$vacanteId', auth: true);
-    return raw is Map<String, dynamic> ? raw : raw['data'];
+    return raw;
   }
 
   Future<Map<String, dynamic>> crearVacante(
       int empresaId, Map<String, dynamic> body) async {
     debugPrint('[CompanyRepo] POST /vacante/$empresaId body: $body');
     final raw = await _api.post('/vacante/$empresaId', body, auth: true);
-    return raw is Map<String, dynamic> ? raw : raw['data'];
+    return raw;
   }
 
   Future<Map<String, dynamic>> actualizarVacante(
       int vacanteId, Map<String, dynamic> body) async {
     final raw = await _api.put('/vacante/$vacanteId', body, auth: true);
-    return raw is Map<String, dynamic> ? raw : raw['data'];
+    return raw;
   }
 
   Future<void> eliminarVacante(int vacanteId) async =>
@@ -225,7 +224,7 @@ class CompanyRepository {
       final res = await _api.post(
           '/swipes/empresa/$empresaId', body, auth: true);
       debugPrint('[CompanyRepo] swipe response: $res');
-      if (res is Map<String, dynamic> && res.containsKey('id')) return res;
+      if ((res as Map).containsKey('id')) return res;
       return null;
     } catch (e) {
       debugPrint('[CompanyRepo] swipeEstudiante error: $e');

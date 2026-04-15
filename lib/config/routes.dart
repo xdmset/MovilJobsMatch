@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../core/constants/app_routes.dart';
 import '../presentation/screens/splash/splash_screen.dart';
 import '../presentation/screens/auth/welcome_screen.dart';
@@ -10,10 +11,7 @@ import '../presentation/screens/auth/register_student_screen.dart';
 import '../presentation/screens/auth/register_company_screen.dart';
 
 // Student
-import '../presentation/screens/student/home/student_home_screen.dart';
 import '../presentation/screens/student/profile/student_edit_profile_screen.dart';
-import '../presentation/screens/common/premium_screen.dart';
-import '../presentation/screens/common/settings_screen.dart';
 
 // Student shell (IndexedStack)
 import '../presentation/screens/student/student_shell_screen.dart';
@@ -31,6 +29,7 @@ import '../presentation/screens/student/settings/student_settings_screen.dart';
 import '../presentation/screens/student/premium/student_premium_screen.dart';
 import '../presentation/screens/company/settings/company_settings_screen.dart';
 import '../presentation/screens/company/premium/company_premium_screen.dart';
+import '../presentation/providers/auth_provider.dart';
 
 
 
@@ -117,10 +116,43 @@ class AppRouter {
           builder: (_, __) => const CompanyPremiumScreen()),
 
       // ── Común ─────────────────────────────────────────────────────────────
-      GoRoute(path: AppRoutes.settings,
-          builder: (_, __) => const SettingsScreen()),
+      // Settings y Premium ahora redirigen según el rol del usuario
+      GoRoute(
+        path: AppRoutes.settings,
+        redirect: (context, state) {
+          final auth = context.read<AuthProvider>();
+          if (auth.autenticado) {
+            return auth.esEstudiante ? AppRoutes.studentSettings : AppRoutes.companySettings;
+          }
+          return AppRoutes.splash;
+        },
+      ),
       // GoRoute(path: AppRoutes.premium,
       //     builder: (_, __) => const PremiumScreen()),
+
+      // ── Deep links PayPal ─────────────────────────────────────────────────
+      GoRoute(
+        path: '/paypal-success',
+        redirect: (context, state) {
+          // Redirigir a premium segun el rol del usuario
+          final auth = context.read<AuthProvider>();
+          if (auth.autenticado) {
+            return auth.esEstudiante ? AppRoutes.studentPremium : AppRoutes.companyPremium;
+          }
+          return AppRoutes.splash;
+        },
+      ),
+      GoRoute(
+        path: '/paypal-cancel',
+        redirect: (context, state) {
+          // Redirigir a premium segun el rol del usuario
+          final auth = context.read<AuthProvider>();
+          if (auth.autenticado) {
+            return auth.esEstudiante ? AppRoutes.studentPremium : AppRoutes.companyPremium;
+          }
+          return AppRoutes.splash;
+        },
+      ),
     ],
 
     errorBuilder: (context, state) => Scaffold(

@@ -56,6 +56,11 @@ class _StudentShellScreenState extends State<StudentShellScreen>
     await p.cargarHistorial(userId);
     await p.cargarVacantes(estudianteId: userId);
     await p.cargarMatches(userId);
+
+    context.read<StudentProvider>().setPremium(
+  context.read<AuthProvider>().esPremium,
+);
+
   }
 
   Future<void> _recargar() async {

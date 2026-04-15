@@ -11,6 +11,7 @@
 // GET  /media/empresas/{user_id}/foto       → URL prefirmada de foto empresa
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/api_service.dart';
 
 class StudentRepository {
@@ -162,6 +163,7 @@ class StudentRepository {
   //
   // FIX: El swipe ya registra la visualización internamente en el backend.
   // NO es necesario llamar registrarVista() además del swipe.
+  // FIX: Guarda postulacion_id en SharedPreferences para usarlo luego en retroalimentación.
   Future<Map<String, dynamic>?> registrarSwipe(
       int estudianteId, int vacanteId, bool interes) async {
     try {
@@ -169,7 +171,18 @@ class StudentRepository {
       debugPrint('[StudentRepo] swipe body: $body');
       final res = await _api.post('/swipes/$estudianteId', body, auth: true);
       debugPrint('[StudentRepo] swipe response: $res');
-      if (res is Map<String, dynamic> && res.containsKey('id')) return res;
+      
+      if ((res as Map).containsKey('id')) {
+        // Guardar postulacion_id en SharedPreferences para uso posterior
+        final postulacionId = res['id'] as int?;
+        if (postulacionId != null) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setInt('postulacion_id_vacante_$vacanteId', postulacionId);
+          debugPrint('[StudentRepo] postulacion_id guardado: '
+              'vacante=$vacanteId, postulacion=$postulacionId');
+        }
+        return res;
+      }
       return null;
     } catch (e) {
       debugPrint('[StudentRepo] registrarSwipe error: $e');
@@ -196,7 +209,24 @@ class StudentRepository {
         '/vacante/historial/estudiante/$estudianteId', auth: true);
     final lista = raw is List ? raw : (raw['data'] as List? ?? []);
     debugPrint('[StudentRepo] historial: ${lista.length} items');
-    return lista.cast<Map<String, dynamic>>();
+    
+    // Enriquecer con postulacion_id desde SharedPreferences
+    final historial = lista.cast<Map<String, dynamic>>();
+    final prefs = await SharedPreferences.getInstance();
+    
+    for (var item in historial) {
+      final vacanteId = item['id'] as int?;
+      if (vacanteId != null && !item.containsKey('postulacion_id')) {
+        final savedPostId = prefs.getInt('postulacion_id_vacante_$vacanteId');
+        if (savedPostId != null) {
+          item['postulacion_id'] = savedPostId;
+          debugPrint('[StudentRepo] postulacion_id enriquecido: '
+              'vacante=$vacanteId, postulacion=$savedPostId');
+        }
+      }
+    }
+    
+    return historial;
   }
 
   // ── Matches reales del servidor ───────────────────────────────────────────

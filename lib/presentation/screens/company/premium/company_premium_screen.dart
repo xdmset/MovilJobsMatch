@@ -30,9 +30,9 @@ class _CompanyPremiumScreenState extends State<CompanyPremiumScreen>
   String? _pendingId;
 
   static const _returnUrl =
-      'https://jobmatch.com.mx/payments/paypal/mobile-success';
+      'jobmatch://paypal-success';
   static const _cancelUrl =
-      'https://jobmatch.com.mx/payments/paypal/mobile-cancel';
+      'jobmatch://paypal-cancel';
 
   @override
   void initState() {
