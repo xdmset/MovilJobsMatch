@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/student_provider.dart';
 import '../../../../data/repositories/paypal_repository.dart';
 
 class StudentPremiumScreen extends StatefulWidget {
@@ -30,9 +31,9 @@ class _StudentPremiumScreenState extends State<StudentPremiumScreen>
   String? _pendingId;
 
   static const _returnUrl =
-      'https://jobmatch.com.mx/payments/paypal/mobile-success';
+      'jobmatch://paypal-success';
   static const _cancelUrl =
-      'https://jobmatch.com.mx/payments/paypal/mobile-cancel';
+      'jobmatch://paypal-cancel';
 
   @override
   void initState() {
@@ -503,6 +504,9 @@ class _StudentPremiumScreenState extends State<StudentPremiumScreen>
     } finally {
       if (mounted) setState(() => _procesando = false);
     }
+    context.read<StudentProvider>().setPremium(
+  context.read<AuthProvider>().esPremium,
+);
   }
 
   void _confirmarCancelacion() {

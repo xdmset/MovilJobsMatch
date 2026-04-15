@@ -438,8 +438,7 @@ class _CandidatesScreenState extends State<CandidatesScreen>
   // ── Perfil completo del candidato ─────────────────────────────────────────
   void _mostrarPerfil(BuildContext context,
       Map<String, dynamic> candidato, CompanyProvider p) {
-    final auth      = context.read<AuthProvider>();
-    final empresaId = auth.usuario?.id ?? 0;
+    // empresaId obtenido de auth.usuario?.id ?? 0
 
     final estudianteId = candidato['estudiante_id'] as int?
         ?? candidato['usuario_id'] as int? ?? 0;

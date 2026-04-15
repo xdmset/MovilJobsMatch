@@ -3,21 +3,31 @@
 // Tab 1 - Matches:       ambos dieron like (datos de /matches/estudiante/{id})
 // Tab 2 - Sin respuesta: estudiante dio like, vacante activa, empresa aún no responde
 // Tab 3 - Rechazadas:    estudiante dio like, pero la vacante está cerrada/inactiva
-//                        → señal de que ya no hay oportunidad aquí
 //
-// Feedback IA: disponible en las 3 tabs con Premium, teaser con botón a premium sin él.
-// Conectado a la API de Anthropic via dart-define ANTHROPIC_API_KEY.
+// Retroalimentación:
+//   - Premium: muestra roadmap del backend (generado por IA en servidor).
+//     Backend llama IA cuando empresa rechaza + ingresa feedback.
+//   - Sin premium: teaser con botón a pantalla premium.
+//
+// postulacion_id: se guarda en SharedPreferences cuando se crea postulación.
+// Se recupera del historial enriquecido cuando se abre ApplicationsScreen.
+//
+// Flujo:
+//   1. Empresa rechaza postulación + ingresa feedback
+//   2. Backend crea retroalimentación + LLAMA IA (Claude)
+//   3. Backend genera roadmap y lo guarda
+//   4. Cliente: GET /retroalimentacion/postulacion/{id}
+//   5. Cliente: muestra roadmap si está generado, o polling si pendiente
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../../core/constants/app_routes.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/student_provider.dart';
+import '../../../../data/repositories/retroalimentacion_repository.dart';
 
 class ApplicationsScreen extends StatefulWidget {
   const ApplicationsScreen({super.key});
@@ -50,13 +60,11 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
 
   // ── Lógica de clasificación ───────────────────────────────────────────────
 
-  /// IDs de vacantes con match real del servidor
   Set<int> _matchIds(StudentProvider p) => p.matches.map((m) {
     final vacante = m['vacante'] as Map<String, dynamic>?;
     return vacante?['id'] as int? ?? m['vacante_id'] as int?;
   }).whereType<int>().toSet();
 
-  /// Todos los likes sin match del estudiante
   List<Map<String, dynamic>> _getLikesEstudiante(StudentProvider p) {
     final ids = _matchIds(p);
     return p.historial.where((h) {
@@ -68,14 +76,12 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     }).toList();
   }
 
-  /// Sin respuesta: dio like, vacante activa, empresa no respondió aún
   List<Map<String, dynamic>> _getSinRespuesta(StudentProvider p) =>
       _getLikesEstudiante(p).where((h) {
         final estado = (h['estado'] as String? ?? 'activa').toLowerCase();
         return estado == 'activa' || estado == 'pausada' || estado.isEmpty;
       }).toList();
 
-  /// Cerradas: dio like, vacante ya no activa (cerrada/archivada)
   List<Map<String, dynamic>> _getRechazadas(StudentProvider p) =>
       _getLikesEstudiante(p).where((h) {
         final estado = (h['estado'] as String? ?? 'activa').toLowerCase();
@@ -188,6 +194,9 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     final empSector   = vacante['empresa_sector']   as String?
                      ?? match['empresa_sector']     as String?;
     final esPremium   = context.read<AuthProvider>().usuario?.esPremium ?? false;
+    // postulacion_id puede venir del match o del vacante enriquecido
+    final postulacionId = match['postulacion_id'] as int?
+        ?? vacante['postulacion_id'] as int?;
 
     String salario = '';
     if (minS != null && maxS != null)
@@ -207,7 +216,6 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
             blurRadius: 16, offset: const Offset(0, 4))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Banner match
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
@@ -278,14 +286,14 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
               ]),
             ),
             const SizedBox(height: 12),
-            // Feedback IA disponible en matches también
-            _buildBotonIA(context, vacante, esPremium,
+            _buildBotonRetro(context, vacante, esPremium,
+                postulacionId: postulacionId,
                 contextoPrompt: 'match — la empresa también los eligió'),
           ]),
         ),
       ]),
-    ), // Container
-    ); // GestureDetector
+    ),
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -308,18 +316,19 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
   }
 
   Widget _buildPendienteCard(BuildContext context, Map<String, dynamic> v) {
-    final titulo    = v['titulo']           as String? ?? 'Vacante';
-    final descripcion = v['descripcion']    as String? ?? '';
-    final modalidad = v['modalidad']        as String? ?? '';
-    final ubicacion = v['ubicacion']        as String? ?? '';
-    final minS      = v['sueldo_minimo'];
-    final maxS      = v['sueldo_maximo'];
-    final moneda    = v['moneda']           as String? ?? 'MXN';
-    final ts        = v['timestamp']        as String? ?? '';
-    final empNombre = v['empresa_nombre']   as String? ?? 'Empresa';
-    final empFotoUrl= v['empresa_foto_url'] as String?;
-    final empSector = v['empresa_sector']   as String?;
-    final esPremium = context.read<AuthProvider>().usuario?.esPremium ?? false;
+    final titulo      = v['titulo']           as String? ?? 'Vacante';
+    final descripcion = v['descripcion']      as String? ?? '';
+    final modalidad   = v['modalidad']        as String? ?? '';
+    final ubicacion   = v['ubicacion']        as String? ?? '';
+    final minS        = v['sueldo_minimo'];
+    final maxS        = v['sueldo_maximo'];
+    final moneda      = v['moneda']           as String? ?? 'MXN';
+    final ts          = v['timestamp']        as String? ?? '';
+    final empNombre   = v['empresa_nombre']   as String? ?? 'Empresa';
+    final empFotoUrl  = v['empresa_foto_url'] as String?;
+    final empSector   = v['empresa_sector']   as String?;
+    final esPremium   = context.read<AuthProvider>().usuario?.esPremium ?? false;
+    final postulacionId = v['postulacion_id'] as int?;
 
     String salario = '';
     if (minS != null && maxS != null) salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
@@ -382,13 +391,14 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                       color: AppColors.textTertiary, height: 1.4)),
             ],
             const SizedBox(height: 12),
-            _buildBotonIA(context, v, esPremium,
+            _buildBotonRetro(context, v, esPremium,
+                postulacionId: postulacionId,
                 contextoPrompt: 'postulación enviada, empresa aún no ha respondido'),
           ]),
         ),
       ]),
-    ), // Container
-    ); // GestureDetector
+    ),
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -411,18 +421,19 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
   }
 
   Widget _buildRechazadaCard(BuildContext context, Map<String, dynamic> v) {
-    final titulo    = v['titulo']           as String? ?? 'Vacante';
-    final descripcion = v['descripcion']    as String? ?? '';
-    final modalidad = v['modalidad']        as String? ?? '';
-    final ubicacion = v['ubicacion']        as String? ?? '';
-    final minS      = v['sueldo_minimo'];
-    final maxS      = v['sueldo_maximo'];
-    final moneda    = v['moneda']           as String? ?? 'MXN';
-    final ts        = v['timestamp']        as String? ?? '';
-    final empNombre = v['empresa_nombre']   as String? ?? 'Empresa';
-    final empFotoUrl= v['empresa_foto_url'] as String?;
-    final empSector = v['empresa_sector']   as String?;
-    final esPremium = context.read<AuthProvider>().usuario?.esPremium ?? false;
+    final titulo      = v['titulo']           as String? ?? 'Vacante';
+    final descripcion = v['descripcion']      as String? ?? '';
+    final modalidad   = v['modalidad']        as String? ?? '';
+    final ubicacion   = v['ubicacion']        as String? ?? '';
+    final minS        = v['sueldo_minimo'];
+    final maxS        = v['sueldo_maximo'];
+    final moneda      = v['moneda']           as String? ?? 'MXN';
+    final ts          = v['timestamp']        as String? ?? '';
+    final empNombre   = v['empresa_nombre']   as String? ?? 'Empresa';
+    final empFotoUrl  = v['empresa_foto_url'] as String?;
+    final empSector   = v['empresa_sector']   as String?;
+    final esPremium   = context.read<AuthProvider>().usuario?.esPremium ?? false;
+    final postulacionId = v['postulacion_id'] as int?;
 
     String salario = '';
     if (minS != null && maxS != null) salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
@@ -439,7 +450,6 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Header rojo
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
@@ -463,7 +473,6 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
           padding: const EdgeInsets.all(14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              // Logo empresa con opacidad reducida para indicar cerrada
               Opacity(
                 opacity: 0.6,
                 child: _logoEmpresa(empFotoUrl, empNombre, 48, 12),
@@ -493,7 +502,6 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
             ],
             const SizedBox(height: 12),
 
-            // Tip motivacional
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -504,8 +512,8 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                 const Icon(Icons.lightbulb_outline, size: 14, color: AppColors.primaryPurple),
                 const SizedBox(width: 8),
                 Expanded(child: Text(
-                  'Esta vacante ya cerró, pero puedes usar el análisis IA para mejorar '
-                  'tu perfil y tener más éxito en tu próxima postulación.',
+                  'Esta vacante ya cerró. Con Premium obtienes un plan de acción '
+                  'personalizado con IA para mejorar tu perfil.',
                   style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.textSecondary, height: 1.4),
                 )),
@@ -513,23 +521,33 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
             ),
             const SizedBox(height: 12),
 
-            // Botón IA — aquí es donde más valor tiene
-            _buildBotonIA(context, v, esPremium,
+            // Tab de Cerradas: es donde más valor tiene el roadmap
+            _buildBotonRetro(context, v, esPremium,
+                postulacionId: postulacionId,
                 contextoPrompt: 'la vacante ya cerró sin que hubiera match',
-                labelBoton: 'Análisis IA — ¿cómo mejorar?'),
+                labelBoton: 'Ver plan de acción IA'),
           ]),
         ),
       ]),
-    ), // Container
-    ); // GestureDetector
+    ),
+    );
   }
 
-  // ── Botón IA reutilizable ─────────────────────────────────────────────────
-  // Se usa en los 3 tabs. Si es premium muestra el botón real, si no el teaser.
-  Widget _buildBotonIA(
+  // ══════════════════════════════════════════════════════════════════════════
+  // BOTÓN DE RETROALIMENTACIÓN — lógica central
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // Prioridad:
+  //  1. Premium + postulacionId → intenta cargar retroalimentación real del backend.
+  //     Si hay roadmap del backend → muestra _RetroBackendSheet.
+  //     Si no hay datos del backend → fallback a IA (_AIFeedbackSheet).
+  //  2. Premium sin postulacionId → fallback directo a IA.
+  //  3. Sin premium → teaser.
+  Widget _buildBotonRetro(
     BuildContext context,
     Map<String, dynamic> vacante,
     bool esPremium, {
+    int? postulacionId,
     String? contextoPrompt,
     String? labelBoton,
   }) {
@@ -537,9 +555,11 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
       return SizedBox(
         width: double.infinity,
         child: OutlinedButton.icon(
-          onPressed: () => _showAIFeedback(context, vacante, contextoPrompt),
+          onPressed: () => _showRetro(
+            context, vacante, postulacionId, contextoPrompt,
+          ),
           icon: const Icon(Icons.auto_awesome, size: 15, color: AppColors.primaryPurple),
-          label: Text(labelBoton ?? 'Análisis IA de tu postulación',
+          label: Text(labelBoton ?? 'Ver análisis y plan de acción',
               style: const TextStyle(color: AppColors.primaryPurple)),
           style: OutlinedButton.styleFrom(
             side: const BorderSide(color: AppColors.primaryPurple),
@@ -568,7 +588,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
           const Icon(Icons.lock_outline, size: 16, color: AppColors.primaryPurple),
           const SizedBox(width: 8),
           const Expanded(child: Text(
-            'Con Premium la IA analiza tu postulación y te da consejos personalizados',
+            'Con Premium la IA genera un roadmap personalizado para mejorar tu perfil',
             style: TextStyle(fontSize: 12, color: AppColors.primaryPurple),
           )),
           const SizedBox(width: 8),
@@ -586,7 +606,24 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     );
   }
 
-  // ── Detalle completo de vacante + empresa ─────────────────────────────────
+  void _showRetro(
+    BuildContext context,
+    Map<String, dynamic> vacante,
+    int? postulacionId,
+    String? contextoPrompt,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _RetroSheet(
+        vacante: vacante,
+        postulacionId: postulacionId,
+        contextoExtra: contextoPrompt,
+      ),
+    );
+  }
+
   void _showDetalle(BuildContext context, Map<String, dynamic> vacante,
       {Color? accentColor}) {
     showModalBottomSheet(
@@ -595,16 +632,6 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
       backgroundColor: Colors.transparent,
       builder: (_) => _DetalleVacanteSheet(
           vacante: vacante, accentColor: accentColor ?? AppColors.primaryPurple),
-    );
-  }
-
-  void _showAIFeedback(BuildContext context, Map<String, dynamic> vacante,
-      [String? contextoExtra]) {
-    showModalBottomSheet(
-      context: context, backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => _AIFeedbackSheet(
-        vacante: vacante, contextoExtra: contextoExtra),
     );
   }
 
@@ -699,8 +726,402 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DETALLE DE VACANTE + EMPRESA
-// Bottom sheet con toda la información de la vacante y empresa
+// SHEET DE RETROALIMENTACIÓN — primero intenta el backend, luego IA como fallback
+// ══════════════════════════════════════════════════════════════════════════════
+class _RetroSheet extends StatefulWidget {
+  final Map<String, dynamic> vacante;
+  final int? postulacionId;
+  final String? contextoExtra;
+
+  const _RetroSheet({
+    required this.vacante,
+    this.postulacionId,
+    this.contextoExtra,
+  });
+
+  @override
+  State<_RetroSheet> createState() => _RetroSheetState();
+}
+
+class _RetroSheetState extends State<_RetroSheet> {
+  final _retroRepo = RetroalimentacionRepository.instance;
+
+  // Estado de carga
+  bool _cargando = true;
+  String _fase = 'Cargando retroalimentación...';
+  RetroalimentacionRead? _retro;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    setState(() { _cargando = true; _fase = 'Consultando feedback del backend...'; });
+
+    if (widget.postulacionId != null) {
+      try {
+        final retro = await _retroRepo.getRetroalimentacion(widget.postulacionId!);
+        if (mounted) {
+          setState(() {
+            _retro = retro;
+            _cargando = false;
+            _fase = retro != null && retro.tieneContenido
+                ? 'Análisis generado'
+                : 'No hay retroalimentación disponible aún';
+          });
+        }
+      } catch (e) {
+        debugPrint('[RetroSheet] error: $e');
+        if (mounted) {
+          setState(() {
+            _cargando = false;
+            _fase = 'Error al cargar retroalimentación';
+          });
+        }
+      }
+    } else {
+      if (mounted) setState(() { _cargando = false; _fase = 'No hay información de postulación'; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final titulo    = widget.vacante['titulo']       as String? ?? 'Vacante';
+    final empNombre = widget.vacante['empresa_nombre'] as String? ?? '';
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85, maxChildSize: 0.97, minChildSize: 0.4,
+      builder: (_, ctrl) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
+        child: Column(children: [
+          // Handle
+          Container(margin: const EdgeInsets.only(top: 12), width: 40, height: 4,
+              decoration: BoxDecoration(color: AppColors.borderLight,
+                  borderRadius: BorderRadius.circular(2))),
+
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                    gradient: AppColors.purpleGradient,
+                    borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.auto_awesome, color: Colors.white, size: 18)),
+              const SizedBox(width: 10),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Plan de acción IA', style: AppTextStyles.subtitle1.copyWith(
+                    fontWeight: FontWeight.bold)),
+                Text('$empNombre · $titulo',
+                    style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textTertiary),
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+              ])),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                    color: AppColors.primaryPurple.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8)),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.workspace_premium, size: 12, color: AppColors.primaryPurple),
+                  SizedBox(width: 4),
+                  Text('Premium', style: TextStyle(fontSize: 11,
+                      color: AppColors.primaryPurple, fontWeight: FontWeight.bold)),
+                ]),
+              ),
+            ]),
+          ),
+          const Divider(height: 20),
+
+          // Contenido
+          Expanded(child: _cargando
+            ? _buildLoading()
+            : SingleChildScrollView(
+                controller: ctrl,
+                padding: const EdgeInsets.all(20),
+                child: _retro != null
+                    ? _buildBackendContent(_retro!)
+                    : Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 40),
+                          child: Column(children: [
+                            Icon(Icons.info_outline, size: 48,
+                                color: AppColors.textTertiary),
+                            const SizedBox(height: 16),
+                            Text(_fase, style: AppTextStyles.subtitle1,
+                                textAlign: TextAlign.center),
+                          ]),
+                        ),
+                      ),
+              ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildLoading() => Column(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+            gradient: AppColors.purpleGradient, shape: BoxShape.circle),
+        child: const Icon(Icons.auto_awesome, color: Colors.white, size: 32)),
+      const SizedBox(height: 20),
+      Text(_fase, style: AppTextStyles.subtitle1.copyWith(
+          color: AppColors.textSecondary)),
+      const SizedBox(height: 8),
+      Text('Preparando tu feedback personalizado',
+          style: AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary)),
+      const SizedBox(height: 24),
+      const CircularProgressIndicator(),
+    ],
+  );
+
+  // ── Vista del contenido del BACKEND ──────────────────────────────────────
+  Widget _buildBackendContent(RetroalimentacionRead retro) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+      // Fuente: empresa
+      if (retro.camposMejora != null || retro.sugerenciasPerfil != null)
+        _seccionHeader('Feedback de la empresa', Icons.business_outlined,
+            AppColors.accentOrange),
+
+      if (retro.camposMejora != null && retro.camposMejora!.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _tarjetaInfo('Áreas de mejora', retro.camposMejora!,
+            Icons.trending_up, AppColors.accentOrange),
+        const SizedBox(height: 12),
+      ],
+
+      if (retro.sugerenciasPerfil != null && retro.sugerenciasPerfil!.isNotEmpty) ...[
+        _tarjetaInfo('Sugerencias para tu perfil', retro.sugerenciasPerfil!,
+            Icons.tips_and_updates_outlined, AppColors.accentBlue),
+        const SizedBox(height: 20),
+      ],
+
+      // Roadmap generado por IA del backend
+      if (retro.roadmapListo) ...[
+        _seccionHeader('Tu plan de acción', Icons.map_outlined,
+            AppColors.primaryPurple),
+        const SizedBox(height: 12),
+
+        // Badge tiempo y prioridad
+        Row(children: [
+          _badgeInfo(Icons.schedule, retro.roadmap!.tiempoEstimado,
+              AppColors.accentGreen),
+          const SizedBox(width: 8),
+          _badgeInfo(Icons.flag_outlined,
+              'Prioridad ${retro.roadmap!.prioridad}',
+              _prioridadColor(retro.roadmap!.prioridad)),
+        ]),
+        const SizedBox(height: 16),
+
+        // Habilidades clave
+        if (retro.roadmap!.habilidades.isNotEmpty) ...[
+          Text('Habilidades clave', style: AppTextStyles.bodyMedium.copyWith(
+              fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 6, children: retro.roadmap!.habilidades
+              .map((h) => _chipHabilidad(h)).toList()),
+          const SizedBox(height: 16),
+        ],
+
+        // Roadmap semana a semana
+        if (retro.roadmap!.roadmapDetallado.isNotEmpty) ...[
+          Text('Semana a semana', style: AppTextStyles.bodyMedium.copyWith(
+              fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          ...retro.roadmap!.roadmapDetallado.asMap().entries.map((e) =>
+              _buildSemanaCard(e.value, e.key)),
+          const SizedBox(height: 16),
+        ],
+
+        // Acciones rápidas
+        if (retro.roadmap!.acciones.isNotEmpty) ...[
+          Text('Acciones recomendadas', style: AppTextStyles.bodyMedium.copyWith(
+              fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          ...retro.roadmap!.acciones.map((a) => _buildBulletItem(a,
+              Icons.check_circle_outline, AppColors.accentGreen)),
+          const SizedBox(height: 16),
+        ],
+
+        // Recursos
+        if (retro.roadmap!.recursos.isNotEmpty) ...[
+          Text('Recursos recomendados', style: AppTextStyles.bodyMedium.copyWith(
+              fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          ...retro.roadmap!.recursos.map((r) => _buildBulletItem(r,
+              Icons.library_books_outlined, AppColors.accentBlue)),
+          const SizedBox(height: 16),
+        ],
+      ],
+
+      // Si roadmap está pendiente (debería haberse resuelto con polling, pero por si acaso)
+      if (retro.roadmapPendiente)
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+              color: Colors.amber.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.amber.withOpacity(0.4))),
+          child: Row(children: [
+            const Icon(Icons.pending_outlined, color: Colors.amber),
+            const SizedBox(width: 10),
+            const Expanded(child: Text(
+              'El plan de acción está siendo generado. Vuelve en unos momentos.',
+              style: TextStyle(color: Colors.amber),
+            )),
+          ]),
+        ),
+
+      const SizedBox(height: 8),
+      SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: () => _cargar(),
+          icon: const Icon(Icons.refresh, size: 16, color: AppColors.primaryPurple),
+          label: const Text('Actualizar', style: TextStyle(color: AppColors.primaryPurple)),
+          style: OutlinedButton.styleFrom(
+            side: const BorderSide(color: AppColors.primaryPurple),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            padding: const EdgeInsets.symmetric(vertical: 12),
+          ),
+        ),
+      ),
+      const SizedBox(height: 8),
+    ]);
+  }
+
+  // ── Helpers de UI del backend ─────────────────────────────────────────────
+
+  Widget _seccionHeader(String titulo, IconData icon, Color color) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(children: [
+      Icon(icon, size: 18, color: color),
+      const SizedBox(width: 8),
+      Text(titulo, style: AppTextStyles.subtitle1.copyWith(
+          fontWeight: FontWeight.bold, color: color)),
+    ]),
+  );
+
+  Widget _tarjetaInfo(String titulo, String contenido, IconData icon, Color color) =>
+      Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+            color: color.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withOpacity(0.2))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(icon, size: 15, color: color),
+            const SizedBox(width: 6),
+            Text(titulo, style: AppTextStyles.bodySmall.copyWith(
+                color: color, fontWeight: FontWeight.bold)),
+          ]),
+          const SizedBox(height: 8),
+          Text(contenido, style: AppTextStyles.bodyMedium.copyWith(
+              color: AppColors.textSecondary, height: 1.5)),
+        ]),
+      );
+
+  Widget _badgeInfo(IconData icon, String label, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.25))),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 13, color: color),
+      const SizedBox(width: 5),
+      Text(label, style: TextStyle(fontSize: 12, color: color,
+          fontWeight: FontWeight.w600)),
+    ]),
+  );
+
+  Widget _chipHabilidad(String label) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+        color: AppColors.primaryPurple.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20)),
+    child: Text(label, style: const TextStyle(fontSize: 12,
+        color: AppColors.primaryPurple, fontWeight: FontWeight.w600)),
+  );
+
+  Widget _buildSemanaCard(RoadmapStep step, int index) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderLight)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(
+          width: 24, height: 24,
+          decoration: BoxDecoration(
+              color: AppColors.primaryPurple,
+              borderRadius: BorderRadius.circular(6)),
+          child: Center(child: Text('${index + 1}', style: const TextStyle(
+              color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
+        ),
+        const SizedBox(width: 8),
+        Expanded(child: Text(step.semana, style: AppTextStyles.bodyMedium.copyWith(
+            fontWeight: FontWeight.bold))),
+      ]),
+      if (step.objetivo.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        Text(step.objetivo, style: AppTextStyles.bodySmall.copyWith(
+            color: AppColors.textSecondary)),
+      ],
+      if (step.tareas.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        ...step.tareas.map((t) => Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 3),
+              child: Icon(Icons.radio_button_unchecked,
+                  size: 10, color: AppColors.primaryPurple),
+            ),
+            const SizedBox(width: 6),
+            Expanded(child: Text(t, style: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textSecondary))),
+          ]),
+        )),
+      ],
+    ]),
+  );
+
+  Widget _buildBulletItem(String texto, IconData icon, Color color) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Icon(icon, size: 16, color: color),
+      const SizedBox(width: 8),
+      Expanded(child: Text(texto, style: AppTextStyles.bodySmall.copyWith(
+          color: AppColors.textSecondary, height: 1.4))),
+    ]),
+  );
+
+  Color _prioridadColor(String p) {
+    switch (p.toLowerCase()) {
+      case 'alta':  return AppColors.error;
+      case 'media': return AppColors.accentOrange;
+      case 'baja':  return AppColors.accentGreen;
+      default:      return AppColors.textSecondary;
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DETALLE DE VACANTE + EMPRESA (sin cambios respecto al original)
 // ══════════════════════════════════════════════════════════════════════════════
 class _DetalleVacanteSheet extends StatelessWidget {
   final Map<String, dynamic> vacante;
@@ -721,7 +1142,6 @@ class _DetalleVacanteSheet extends StatelessWidget {
     final estado        = vacante['estado']              as String? ?? '';
     final fechaPub      = vacante['fecha_publicacion']   as String? ?? '';
 
-    // Datos empresa
     final empNombre     = vacante['empresa_nombre']      as String? ?? 'Empresa';
     final empFotoUrl    = vacante['empresa_foto_url']    as String?;
     final empSector     = vacante['empresa_sector']      as String? ?? '';
@@ -803,24 +1223,20 @@ class _DetalleVacanteSheet extends StatelessWidget {
           color: Theme.of(context).scaffoldBackgroundColor,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
         child: Column(children: [
-          // Handle
           Container(margin: const EdgeInsets.only(top: 12), width: 40, height: 4,
               decoration: BoxDecoration(color: AppColors.borderLight,
                   borderRadius: BorderRadius.circular(2))),
 
-          // Header empresa
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               logoEmpresa(),
               const SizedBox(width: 14),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                // Empresa nombre
                 Row(children: [
                   Expanded(child: Text(empNombre,
                       style: AppTextStyles.bodyMedium.copyWith(
                           color: accentColor, fontWeight: FontWeight.bold))),
-                  // Badge estado
                   if (estado.isNotEmpty)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -840,7 +1256,6 @@ class _DetalleVacanteSheet extends StatelessWidget {
                   Text(empSector, style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.textTertiary)),
                 const SizedBox(height: 4),
-                // Título puesto
                 Text(titulo, style: AppTextStyles.h4.copyWith(
                     fontWeight: FontWeight.bold)),
               ])),
@@ -848,13 +1263,10 @@ class _DetalleVacanteSheet extends StatelessWidget {
           ),
           const Divider(height: 1),
 
-          // Cuerpo scrolleable
           Expanded(child: SingleChildScrollView(
             controller: ctrl,
             padding: const EdgeInsets.all(20),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
-              // ── Chips rápidos ──────────────────────────────────────────────
               Wrap(spacing: 8, runSpacing: 8, children: [
                 if (modalidad.isNotEmpty) _chipDetalle(lModal(modalidad), accentColor),
                 if (ubicacion.isNotEmpty) _chipDetalle('📍 $ubicacion', AppColors.accentBlue),
@@ -863,7 +1275,6 @@ class _DetalleVacanteSheet extends StatelessWidget {
               ]),
               const SizedBox(height: 20),
 
-              // ── Descripción ────────────────────────────────────────────────
               if (descripcion.isNotEmpty) ...[
                 sectionTitle('Descripción del puesto'),
                 Text(descripcion, style: AppTextStyles.bodyMedium.copyWith(
@@ -871,7 +1282,6 @@ class _DetalleVacanteSheet extends StatelessWidget {
                 const SizedBox(height: 20),
               ],
 
-              // ── Requisitos ─────────────────────────────────────────────────
               if (requisitos.isNotEmpty) ...[
                 sectionTitle('Requisitos'),
                 Container(
@@ -886,7 +1296,6 @@ class _DetalleVacanteSheet extends StatelessWidget {
                 const SizedBox(height: 20),
               ],
 
-              // ── Info de la vacante ─────────────────────────────────────────
               sectionTitle('Detalles del puesto'),
               if (modalidad.isNotEmpty)
                 infoRow(Icons.work_outline, 'Modalidad', lModal(modalidad)),
@@ -902,7 +1311,6 @@ class _DetalleVacanteSheet extends StatelessWidget {
                     fmtFecha(fechaPub)),
               const SizedBox(height: 20),
 
-              // ── Sobre la empresa ───────────────────────────────────────────
               sectionTitle('Sobre la empresa'),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -980,244 +1388,5 @@ class _DetalleVacanteSheet extends StatelessWidget {
     final d = double.tryParse(n.toString()) ?? 0;
     return d.truncate().toString().replaceAllMapped(
         RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// WIDGET DE RETROALIMENTACIÓN IA
-// Conectado a la API de Anthropic via --dart-define=ANTHROPIC_API_KEY=sk-ant-...
-// ══════════════════════════════════════════════════════════════════════════════
-class _AIFeedbackSheet extends StatefulWidget {
-  final Map<String, dynamic> vacante;
-  final String? contextoExtra;
-  const _AIFeedbackSheet({required this.vacante, this.contextoExtra});
-  @override
-  State<_AIFeedbackSheet> createState() => _AIFeedbackSheetState();
-}
-
-class _AIFeedbackSheetState extends State<_AIFeedbackSheet> {
-  bool _cargando = true;
-  String _feedback = '';
-  String? _error;
-
-  static const _apiKey = String.fromEnvironment('ANTHROPIC_API_KEY');
-
-  @override
-  void initState() { super.initState(); _generarFeedback(); }
-
-  Future<void> _generarFeedback() async {
-    setState(() { _cargando = true; _error = null; _feedback = ''; });
-    try {
-      final v         = widget.vacante;
-      final titulo    = v['titulo']              as String? ?? 'la vacante';
-      final desc      = v['descripcion']         as String? ?? '';
-      final requi     = v['requisitos']          as String? ?? '';
-      final modalidad = v['modalidad']           as String? ?? '';
-      final contrato  = v['tipo_contrato']       as String? ?? '';
-      final empNombre = v['empresa_nombre']      as String? ?? '';
-      final empSector = v['empresa_sector']      as String? ?? '';
-      final empDesc   = v['empresa_descripcion'] as String? ?? '';
-      final contexto  = widget.contextoExtra ?? 'postulación enviada';
-
-      final prompt = '''
-Eres un coach de carrera experto en reclutamiento laboral para jóvenes estudiantes mexicanos.
-
-Contexto de la postulación: $contexto.
-
-Datos de la vacante:
-- Puesto: $titulo
-- Empresa: $empNombre${empSector.isNotEmpty ? ' ($empSector)' : ''}
-- Modalidad: $modalidad
-- Contrato: $contrato
-${empDesc.isNotEmpty ? '- Sobre la empresa: $empDesc' : ''}
-${desc.isNotEmpty ? '- Descripción: $desc' : ''}
-${requi.isNotEmpty ? '- Requisitos: $requi' : ''}
-
-Responde en español, de forma amigable, motivadora y concreta. Usa exactamente 3 secciones:
-
-🎯 Por qué esta oportunidad vale la pena
-(2-3 oraciones sobre el valor de esta vacante/empresa para un estudiante)
-
-💡 Cómo destacar tu perfil para este puesto
-(3-4 consejos accionables específicos basados en los requisitos de la vacante)
-
-✅ Próximos pasos concretos
-(2-3 acciones que puede hacer ahora mismo para mejorar sus chances)
-
-Sé específico. No uses frases genéricas. Máximo 280 palabras en total.
-''';
-
-      final text = await _callClaude(prompt);
-      if (mounted) setState(() { _feedback = text; _cargando = false; });
-    } catch (e) {
-      if (mounted) setState(() {
-        _error = 'No se pudo generar el análisis. Verifica tu conexión.';
-        _cargando = false;
-      });
-    }
-  }
-
-  Future<String> _callClaude(String prompt) async {
-    if (_apiKey.isEmpty) {
-      throw Exception('ANTHROPIC_API_KEY no configurada. '
-          'Ejecuta con --dart-define=ANTHROPIC_API_KEY=sk-ant-...');
-    }
-    final response = await http.post(
-      Uri.parse('https://api.anthropic.com/v1/messages'),
-      headers: {
-        'Content-Type':       'application/json',
-        'x-api-key':          _apiKey,
-        'anthropic-version':  '2023-06-01',
-      },
-      body: jsonEncode({
-        'model':      'claude-sonnet-4-20250514',
-        'max_tokens': 1000,
-        'messages':   [{'role': 'user', 'content': prompt}],
-      }),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('API error ${response.statusCode}: ${response.body}');
-    }
-
-    final data    = jsonDecode(response.body) as Map<String, dynamic>;
-    final content = data['content'] as List?;
-    if (content == null || content.isEmpty) throw Exception('Sin respuesta');
-    return (content.first as Map)['text'] as String? ?? '';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final titulo = widget.vacante['titulo'] as String? ?? 'Vacante';
-    final empNombre = widget.vacante['empresa_nombre'] as String? ?? '';
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.80, maxChildSize: 0.95, minChildSize: 0.4,
-      builder: (_, ctrl) => Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
-        child: Column(children: [
-          // Handle
-          Container(margin: const EdgeInsets.only(top: 12), width: 40, height: 4,
-              decoration: BoxDecoration(color: AppColors.borderLight,
-                  borderRadius: BorderRadius.circular(2))),
-
-          // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            child: Row(children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                    gradient: AppColors.purpleGradient,
-                    borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.auto_awesome, color: Colors.white, size: 18)),
-              const SizedBox(width: 10),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Análisis IA', style: AppTextStyles.subtitle1.copyWith(
-                    fontWeight: FontWeight.bold)),
-                Text('$empNombre · $titulo',
-                    style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textTertiary),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-              ])),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                    color: AppColors.primaryPurple.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8)),
-                child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.workspace_premium, size: 12, color: AppColors.primaryPurple),
-                  SizedBox(width: 4),
-                  Text('Premium', style: TextStyle(fontSize: 11,
-                      color: AppColors.primaryPurple, fontWeight: FontWeight.bold)),
-                ]),
-              ),
-            ]),
-          ),
-          const Divider(height: 20),
-
-          // Contenido
-          Expanded(child: _cargando
-            ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                      gradient: AppColors.purpleGradient, shape: BoxShape.circle),
-                  child: const Icon(Icons.auto_awesome, color: Colors.white, size: 32)),
-                const SizedBox(height: 20),
-                Text('Analizando tu postulación...',
-                    style: AppTextStyles.subtitle1.copyWith(color: AppColors.textSecondary)),
-                const SizedBox(height: 8),
-                Text('La IA está preparando tu feedback personalizado',
-                    style: AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary)),
-                const SizedBox(height: 24),
-                const CircularProgressIndicator(),
-              ])
-            : _error != null
-              ? Center(child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    const Icon(Icons.error_outline, size: 48, color: AppColors.error),
-                    const SizedBox(height: 12),
-                    Text(_error!, style: AppTextStyles.bodyMedium.copyWith(
-                        color: AppColors.textSecondary), textAlign: TextAlign.center),
-                    const SizedBox(height: 20),
-                    ElevatedButton.icon(
-                        onPressed: _generarFeedback,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Reintentar')),
-                  ])))
-              : SingleChildScrollView(
-                  controller: ctrl,
-                  padding: const EdgeInsets.all(20),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    // Contexto de la vacante
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                          color: AppColors.primaryPurple.withOpacity(0.07),
-                          borderRadius: BorderRadius.circular(12)),
-                      child: Row(children: [
-                        const Icon(Icons.business_outlined, size: 16,
-                            color: AppColors.primaryPurple),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(
-                          '${empNombre.isNotEmpty ? "$empNombre · " : ""}$titulo',
-                          style: AppTextStyles.bodyMedium.copyWith(
-                              color: AppColors.primaryPurple, fontWeight: FontWeight.w600),
-                        )),
-                      ]),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Feedback de la IA
-                    Text(_feedback, style: AppTextStyles.bodyMedium.copyWith(
-                        color: AppColors.textSecondary, height: 1.7)),
-                    const SizedBox(height: 24),
-
-                    // Regenerar
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _generarFeedback,
-                        icon: const Icon(Icons.refresh, size: 16, color: AppColors.primaryPurple),
-                        label: const Text('Generar nuevo análisis',
-                            style: TextStyle(color: AppColors.primaryPurple)),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: AppColors.primaryPurple),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                    ),
-                  ]),
-                ),
-          ),
-        ]),
-      ),
-    );
   }
 }

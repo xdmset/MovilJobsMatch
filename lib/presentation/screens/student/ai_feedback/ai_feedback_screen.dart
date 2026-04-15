@@ -36,8 +36,9 @@ class AIFeedbackScreen extends StatefulWidget {
 class _AIFeedbackScreenState extends State<AIFeedbackScreen> {
   bool   _isAnalyzing = true;
   bool   _analysisComplete = false;
-  String _analysisText = '';
+
   String? _error;
+  String _analysisText = '';
 
   // Secciones parseadas del texto de Claude
   List<_Section> _sections = [];

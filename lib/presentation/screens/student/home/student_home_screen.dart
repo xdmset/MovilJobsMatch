@@ -24,11 +24,13 @@ class StudentHomeScreen extends StatelessWidget {
           children: [
             Text('Explorar vacantes', style: AppTextStyles.h4),
             Text(
-              p.hasReachedLimit
-                  ? 'Límite diario alcanzado'
-                  : '${p.remainingSwipes} restantes hoy',
+              p.esPremium
+                  ? 'Premium Ilimitado ✨'
+                  : p.hasReachedLimit
+                      ? 'Límite diario alcanzado'
+                      : '${p.remainingSwipes} restantes hoy',
               style: AppTextStyles.bodySmall.copyWith(
-                  color: p.hasReachedLimit
+                  color: p.hasReachedLimit && !p.esPremium
                       ? AppColors.error : AppColors.textTertiary),
             ),
           ],
@@ -167,7 +169,7 @@ class StudentHomeScreen extends StatelessWidget {
   }
 
   Widget _buildSwipeProgress(StudentProvider p) {
-    final pct = (p.remainingSwipes / p.maxSwipes).clamp(0.0, 1.0);
+    final pct = (p.remainingSwipes != null ? (p.remainingSwipes! / p.maxSwipes).clamp(0.0, 1.0) : 0.0);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Row(children: [

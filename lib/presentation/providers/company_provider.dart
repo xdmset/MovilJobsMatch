@@ -72,8 +72,8 @@ class CompanyProvider extends ChangeNotifier {
         _repo.getPostulaciones(userId),
         _repo.getCandidatosFeed(userId, ids),
       ]);
-      _postulaciones  = candidatosResults[0] as List<Map<String, dynamic>>;
-      _candidatosFeed = candidatosResults[1] as List<Map<String, dynamic>>;
+      _postulaciones  = candidatosResults[0];
+      _candidatosFeed = candidatosResults[1];
 
       _status = CompanyStatus.cargado;
       debugPrint('[CompanyProvider] Dashboard cargado: '
@@ -98,8 +98,8 @@ class CompanyProvider extends ChangeNotifier {
         _repo.getPostulaciones(userId),
         _repo.getCandidatosFeed(userId, ids),
       ]);
-      _postulaciones  = results[0] as List<Map<String, dynamic>>;
-      _candidatosFeed = results[1] as List<Map<String, dynamic>>;
+      _postulaciones  = results[0];
+      _candidatosFeed = results[1];
       debugPrint('[CompanyProvider] Candidatos recargados: '
           '${_postulaciones.length} postulaciones, '
           '${_candidatosFeed.length} en feed');

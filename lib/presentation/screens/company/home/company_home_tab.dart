@@ -230,7 +230,7 @@ class CompanyHomeTab extends StatelessWidget {
         ?? candidato['usuario_id'] as int? ?? 0;
     final vacanteId    = candidato['vacante_id'] as int? ?? 0;
     final nombre       = candidato['nombre_completo'] as String?;
-    final nivel        = candidato['nivel_academico'] as String? ?? '';
+    // nivel académico del candidato
     final institucion  = candidato['institucion_educativa'] as String? ?? '';
     final fotoUrl      = candidato['foto_perfil_url'] as String?;
     final fechaStr     = candidato['fecha_like'] as String? ?? '';

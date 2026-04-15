@@ -10,6 +10,20 @@ class StudentProvider extends ChangeNotifier {
 
   int? _estudianteId;
 
+  // ── Premium flag ───────────────────────────────────────────────────────────
+  // Inyectado desde AuthProvider. Cuando es true, hasReachedLimit siempre
+  // devuelve false (swipes ilimitados) y remainingSwipes devuelve null.
+  bool _esPremium = false;
+
+  void setPremium(bool value) {
+    if (_esPremium == value) return;
+    _esPremium = value;
+    notifyListeners();
+    debugPrint('[StudentProvider] esPremium → $_esPremium');
+  }
+
+  bool get esPremium => _esPremium;
+
   // ── Feed ──────────────────────────────────────────────────────────────────
   List<Map<String, dynamic>> _vacantes = [];
   int  _currentIndex  = 0;
@@ -27,8 +41,13 @@ class StudentProvider extends ChangeNotifier {
 
   List<Map<String, dynamic>> get vacantes      => _vacantes;
   int  get currentIndex                         => _currentIndex;
-  bool get hasReachedLimit                      => _dailySwipes >= maxSwipes;
-  int  get remainingSwipes                      => maxSwipes - _dailySwipes;
+
+  // CAMBIO CLAVE: premium → nunca llega al límite
+  bool get hasReachedLimit => _esPremium ? false : _dailySwipes >= maxSwipes;
+
+  // null cuando es premium (ilimitado), número concreto cuando no lo es
+  int? get remainingSwipes => _esPremium ? null : maxSwipes - _dailySwipes;
+
   bool get cargandoVacantes                     => _cargandoVacantes;
   String? get filtroModalidad                   => _filtroModalidad;
   String? get filtroUbicacion                   => _filtroUbicacion;
@@ -59,19 +78,16 @@ class StudentProvider extends ChangeNotifier {
   bool get cargandoHistorial => _cargandoHistorial;
 
   // FIX PRINCIPAL: Set de IDs ya procesados — única fuente de verdad.
-  // Se llena desde el historial del servidor en cargarHistorial().
-  // TODO los métodos de carga de vacantes lo usan para deduplicar.
   final Set<int> _vacanteIdsVistas = {};
 
-  // Flag para saber si el historial ya fue cargado
   bool _historialCargado = false;
   bool get historialCargado => _historialCargado;
 
-  // ── Clave SharedPreferences para swipes del día ───────────────────────────
-  static String _prefKeySwipes(int id) => 'daily_swipes_${id}_${_hoyKey()}';
-  static String _hoyKey() {
+  // ── Clave SharedPreferences para swipes por hora ────────────────────────
+  static String _prefKeySwipes(int id) => 'hourly_swipes_${id}_${_horaKey()}';
+  static String _horaKey() {
     final n = DateTime.now();
-    return '${n.year}${n.month.toString().padLeft(2,'0')}${n.day.toString().padLeft(2,'0')}';
+    return '${n.year}${n.month.toString().padLeft(2,'0')}${n.day.toString().padLeft(2,'0')}${n.hour.toString().padLeft(2,'0')}';
   }
 
   // ── Cargar historial — SIEMPRE llamar antes de cargarVacantes ────────────
@@ -80,25 +96,19 @@ class StudentProvider extends ChangeNotifier {
     _cargandoHistorial = true;
     notifyListeners();
     try {
-      await _restaurarSwipesDiarios(estudianteId);
+      await _restaurarSwipesHorarios(estudianteId);
 
       final serverItems = await _repo.getHistorialEstudiante(estudianteId);
       debugPrint('[StudentProvider] historial: ${serverItems.length} items');
 
-      // Preservar IDs locales de sesión ANTES de limpiar
-      // (son los swipes que ya registramos en esta sesión pero el servidor
-      //  aún no los tiene en el historial porque /view puede tardar o fallar)
       final idsLocalesSesion = Set<int>.from(_vacanteIdsVistas);
 
-      // Reconstruir el set completo de IDs vistos desde el servidor
       _vacanteIdsVistas.clear();
       for (final v in serverItems) {
         final id = v['id'] as int?;
         if (id != null) _vacanteIdsVistas.add(id);
       }
-      // Re-agregar los IDs locales (unión servidor + sesión)
       _vacanteIdsVistas.addAll(idsLocalesSesion);
-      // También incluir cualquier item del historial local no cubierto
       for (final h in _historial) {
         final id = h['id'] as int?;
         if (id != null) _vacanteIdsVistas.add(id);
@@ -106,7 +116,6 @@ class StudentProvider extends ChangeNotifier {
 
       debugPrint('[StudentProvider] _vacanteIdsVistas: ${_vacanteIdsVistas.length} IDs');
 
-      // IDs con match real del servidor (cargados previamente en cargarMatches)
       final matchVacanteIds = _matchesServidor
           .map((m) => m['vacante_id'] as int?)
           .whereType<int>()
@@ -121,14 +130,12 @@ class StudentProvider extends ChangeNotifier {
             ? (v['fecha_like'] as String? ?? v['ultima_visualizacion'] as String? ?? '')
             : (v['ultima_visualizacion'] as String? ?? '');
 
-        // Preservar estado_postulacion y feedback si vienen del servidor
         return <String, dynamic>{
           ...v,
           'tipo':               leDioLike ? 'like' : 'dislike',
           'timestamp':          ts,
           'match':              tieneMatch,
           'le_dio_like':        leDioLike,
-          // Preservar campos de postulación si existen
           if (v['estado_postulacion'] != null)
             'estado_postulacion': v['estado_postulacion'],
           if (v['feedback'] != null) 'feedback': v['feedback'],
@@ -152,7 +159,6 @@ class StudentProvider extends ChangeNotifier {
 
       _historialCargado = true;
 
-      // FIX: filtrar las vacantes en memoria que ya fueron vistas
       if (_vacantes.isNotEmpty) {
         _vacantes = _deduplicar(_vacantes);
         _currentIndex = 0;
@@ -165,19 +171,22 @@ class StudentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _restaurarSwipesDiarios(int estudianteId) async {
+  Future<void> _restaurarSwipesHorarios(int estudianteId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final key = _prefKeySwipes(estudianteId);
       _dailySwipes = prefs.getInt(key) ?? 0;
       final keysViejas = prefs.getKeys()
-          .where((k) => k.startsWith('daily_swipes_${estudianteId}_') && k != key);
+          .where((k) => k.startsWith('hourly_swipes_${estudianteId}_') && k != key);
       for (final k in keysViejas) await prefs.remove(k);
     } catch (_) {}
   }
 
   Future<void> _guardarSwipesDiarios() async {
     if (_estudianteId == null) return;
+    // Si es premium, no gastamos el contador (aunque lo incrementamos
+    // localmente para analytics, no lo persistimos como límite)
+    if (_esPremium) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(_prefKeySwipes(_estudianteId!), _dailySwipes);
@@ -191,18 +200,14 @@ class StudentProvider extends ChangeNotifier {
       final lista = await _repo.getMatches(estudianteId);
       _matchesServidor.clear();
 
-      // Enriquecer cada match con datos de la vacante.
-      // Primero buscar en historial local, si no existe pedirla al backend.
       for (final m in lista) {
         final vacanteId = m['vacante_id'] as int?;
 
-        // 1. Buscar en historial local (ya enriquecida con empresa)
         Map<String, dynamic>? vacanteData = vacanteId != null
             ? _historial.cast<Map<String, dynamic>?>()
                 .firstWhere((h) => h?['id'] == vacanteId, orElse: () => null)
             : null;
 
-        // 2. Si no está en historial, pedir la vacante al backend con datos de empresa
         if ((vacanteData == null || vacanteData.isEmpty) && vacanteId != null) {
           debugPrint('[StudentProvider] match vacante $vacanteId no en historial, cargando...');
           vacanteData = await _repo.getVacanteById(vacanteId);
@@ -220,8 +225,6 @@ class StudentProvider extends ChangeNotifier {
   }
 
   // ── Cargar vacantes ───────────────────────────────────────────────────────
-  // FIX: siempre espera a que el historial esté cargado antes de pedir el feed,
-  // así _vacanteIdsVistas tiene todos los IDs y _deduplicar() funciona bien.
   Future<void> cargarVacantes({
     String? modalidad, String? ubicacion, double? sueldoMin,
     String? busqueda, String? contrato, String? empresa,
@@ -230,8 +233,6 @@ class StudentProvider extends ChangeNotifier {
     if (estudianteId != null) _estudianteId = estudianteId;
     final id = _estudianteId;
 
-    // FIX: si el historial no se cargó todavía, cargarlo primero
-    // para tener _vacanteIdsVistas completo antes de pedir el feed
     if (!_historialCargado && id != null) {
       await cargarHistorial(id);
     }
@@ -249,10 +250,6 @@ class StudentProvider extends ChangeNotifier {
 
       List<Map<String, dynamic>> lista = [];
 
-      // SIEMPRE usar el feed del servidor (filtra las ya vistas en el backend).
-      // Los filtros de modalidad, ubicación y sueldo que el backend soporta se
-      // envían como query params; el resto se aplica localmente después.
-      // De esta forma _deduplicar() siempre tiene _vacanteIdsVistas completo.
       if (id != null) {
         lista = await _repo.getVacantesFeed(
           id,
@@ -264,7 +261,6 @@ class StudentProvider extends ChangeNotifier {
             '(modalidad: $modFinal, ubicacion: $ubicFinal, sueldo: $sueldoFinal)');
       }
 
-      // Filtros locales: búsqueda de texto, tipo de contrato y empresa
       final hayFiltrosLocales = buscFinal != null || contrFinal != null || empFinal != null;
       if (hayFiltrosLocales) {
         lista = _aplicarFiltrosLocales(lista,
@@ -272,8 +268,6 @@ class StudentProvider extends ChangeNotifier {
         debugPrint('[StudentProvider] tras filtros locales: ${lista.length} vacantes');
       }
 
-      // FIX: siempre deduplicar — elimina tanto repetidos en el array
-      // como los que ya están en _vacanteIdsVistas (historial del servidor)
       lista = _deduplicar(lista);
 
       _vacantes = lista;
@@ -281,8 +275,6 @@ class StudentProvider extends ChangeNotifier {
       debugPrint('[StudentProvider] vacantes disponibles tras dedup: ${lista.length} '
           '(vistas: ${_vacanteIdsVistas.length})');
 
-      // Registrar vista de la primera tarjeta del feed para que aparezca
-      // en el historial del backend desde el primer momento
       if (lista.isNotEmpty) {
         final primerIdVacante = lista.first['id'] as int?;
         if (primerIdVacante != null) {
@@ -298,13 +290,11 @@ class StudentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Filtros que el backend no soporta y se aplican en memoria
   List<Map<String, dynamic>> _aplicarFiltrosLocales(
     List<Map<String, dynamic>> lista, {
     String? busqueda, String? contrato, String? empresa,
   }) {
     return lista.where((v) {
-      // Búsqueda de texto: título, nombre de empresa, descripción y requisitos
       if (busqueda != null && busqueda.isNotEmpty) {
         final q      = busqueda.toLowerCase().trim();
         final titulo = (v['titulo']         as String? ?? '').toLowerCase();
@@ -314,15 +304,12 @@ class StudentProvider extends ChangeNotifier {
         if (!titulo.contains(q) && !empN.contains(q) &&
             !desc.contains(q) && !requi.contains(q)) return false;
       }
-      // Tipo de contrato: comparación case-insensitive, acepta parcial
       if (contrato != null && contrato.isNotEmpty) {
         final cFiltro = contrato.toLowerCase().trim();
         final cVac    = (v['tipo_contrato'] as String? ?? '').toLowerCase().trim();
-        // Si la vacante no tiene contrato definido y se filtra por contrato → excluir
         if (cVac.isEmpty) return false;
         if (!cVac.contains(cFiltro) && !cFiltro.contains(cVac)) return false;
       }
-      // Empresa: comparación case-insensitive
       if (empresa != null && empresa.isNotEmpty) {
         final e = (v['empresa_nombre'] as String? ?? '').toLowerCase();
         if (!e.contains(empresa.toLowerCase().trim())) return false;
@@ -331,15 +318,14 @@ class StudentProvider extends ChangeNotifier {
     }).toList();
   }
 
-  // FIX: elimina duplicados dentro del array Y las ya vistas
   List<Map<String, dynamic>> _deduplicar(List<Map<String, dynamic>> lista) {
     final vistos = <int>{};
     final resultado = <Map<String, dynamic>>[];
     for (final v in lista) {
       final id = v['id'] as int?;
       if (id == null) continue;
-      if (_vacanteIdsVistas.contains(id)) continue; // ya procesada
-      if (vistos.contains(id)) continue;             // duplicada en el array
+      if (_vacanteIdsVistas.contains(id)) continue;
+      if (vistos.contains(id)) continue;
       vistos.add(id);
       resultado.add(v);
     }
@@ -381,7 +367,6 @@ class StudentProvider extends ChangeNotifier {
     final v         = currentVacancy!;
     final vacanteId = v['id'] as int?;
 
-    // Marcar como vista ANTES de avanzar el índice
     if (vacanteId != null) _vacanteIdsVistas.add(vacanteId);
     _dailySwipes++;
     _currentIndex++;
@@ -389,8 +374,6 @@ class StudentProvider extends ChangeNotifier {
 
     bool esMatch = false;
     if (vacanteId != null) {
-      // Registrar vista en el historial del backend (necesario para que
-      // aparezca en /vacante/historial/estudiante/{id})
       unawaited(_repo.registrarVista(vacanteId));
       final matchRes = await _repo.registrarSwipe(estudianteId, vacanteId, true);
       if (matchRes != null) {
@@ -399,7 +382,6 @@ class StudentProvider extends ChangeNotifier {
       }
     }
 
-    // Registrar vista de la SIGUIENTE tarjeta si existe
     final nextVacancy = currentVacancy;
     final nextId = nextVacancy?['id'] as int?;
     if (nextId != null) unawaited(_repo.registrarVista(nextId));
@@ -427,7 +409,6 @@ class StudentProvider extends ChangeNotifier {
 
     if (vacanteId != null) {
       _vacanteIdsVistas.add(vacanteId);
-      // Registrar vista en el historial del backend
       unawaited(_repo.registrarVista(vacanteId));
     }
 
@@ -447,7 +428,6 @@ class StudentProvider extends ChangeNotifier {
     await _guardarSwipesDiarios();
     notifyListeners();
 
-    // Registrar vista de la SIGUIENTE tarjeta si existe
     final nextId = currentVacancy?['id'] as int?;
     if (nextId != null) unawaited(_repo.registrarVista(nextId));
 
@@ -507,6 +487,7 @@ class StudentProvider extends ChangeNotifier {
     _dailySwipes  = 0;
     _estudianteId = null;
     _historialCargado = false;
+    _esPremium = false;
     _filtroModalidad = null;
     _filtroUbicacion = null;
     _filtroSueldoMin = null;
