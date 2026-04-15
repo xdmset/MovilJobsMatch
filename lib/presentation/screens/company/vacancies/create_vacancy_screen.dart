@@ -44,7 +44,7 @@ class _CreateVacancyScreenState extends State<CreateVacancyScreen> {
     'Servicio social', 'Por proyecto', 'Temporal', 'Freelance',
   ];
   static const _monedas = ['MXN', 'USD', 'EUR'];
-  static const _estados = ['activa', 'inactiva', 'pausado'];
+  static const _estados = ['activa', 'pausada', 'cerrada'];
 
   @override
   void dispose() {
@@ -498,35 +498,37 @@ class _CreateVacancyScreenState extends State<CreateVacancyScreen> {
 
   Color _estadoColor(String e) {
     switch (e) {
-      case 'activa':   return AppColors.accentGreen;
-      case 'inactiva': return AppColors.error;
-      case 'pausado':  return Colors.orange;
-      default:         return AppColors.primaryPurple;
+      case 'activa':  return AppColors.accentGreen;
+      case 'pausada': return Colors.orange;
+      case 'cerrada': return AppColors.error;
+      default:        return AppColors.primaryPurple;
     }
   }
 
   IconData _estadoIcon(String e) {
     switch (e) {
-      case 'activa':   return Icons.check_circle_outline;
-      case 'inactiva': return Icons.cancel_outlined;
-      case 'pausado':  return Icons.pause_circle_outline;
-      default:         return Icons.info_outline;
+      case 'activa':  return Icons.check_circle_outline;
+      case 'pausada': return Icons.pause_circle_outline;
+      case 'cerrada': return Icons.cancel_outlined;
+      default:        return Icons.info_outline;
     }
   }
 
   String _lEstado(String e) {
     switch (e) {
-      case 'activa': return 'Activa'; case 'inactiva': return 'Inactiva';
-      case 'pausado': return 'Pausada'; default: return e;
+      case 'activa':  return 'Activa';
+      case 'pausada': return 'Pausada';
+      case 'cerrada': return 'Cerrada';
+      default:        return e;
     }
   }
 
   String _estadoDesc(String e) {
     switch (e) {
-      case 'activa':   return 'Visible para todos los estudiantes inmediatamente';
-      case 'inactiva': return 'No visible — la puedes activar después desde tu perfil';
-      case 'pausado':  return 'Visible pero no recibe nuevas postulaciones';
-      default:         return '';
+      case 'activa':  return 'Visible para todos los estudiantes inmediatamente';
+      case 'pausada': return 'Visible pero no recibe nuevas postulaciones';
+      case 'cerrada': return 'Puesto cubierto — no visible para estudiantes';
+      default:        return '';
     }
   }
 }
