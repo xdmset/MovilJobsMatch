@@ -10,6 +10,7 @@ class ApiConstants {
 
   // ── User ──────────────────────────────────────────────────────────────────
   static const String createUser = '/user/';
+  static const String updateFcmToken = '/user/me/fcm-token';
 
   // ── Roles ─────────────────────────────────────────────────────────────────
   static const String roles = '/rol/';
@@ -57,6 +58,20 @@ class ApiConstants {
 
   // ── Usuarios ─────────────────────────────────────────────────────────────
   static const String readUsers = '/user/';
+
+  // ── Notificaciones ───────────────────────────────────────────────────────
+  static const String notificaciones         = '/notificaciones/';
+  static const String notificacionesResumen  = '/notificaciones/resumen';
+  static const String notificacionesLeerTodas = '/notificaciones/leer-todas';
+  static String notificacionLeer(int id) => '/notificaciones/$id/leer';
+
+  // ── Interacciones (vista unificada de historial) ──────────────────────────
+  static String interaccionesEstudiante(int estudianteId) =>
+      '/swipes/$estudianteId/interacciones';
+  static String interaccionesEmpresa(int empresaId) =>
+      '/swipes/empresa/$empresaId/interacciones';
+  static String interaccionesEmpresaVacante(int empresaId, int vacanteId) =>
+      '/swipes/empresa/$empresaId/vacante/$vacanteId/interacciones';
 
   // ── Config ────────────────────────────────────────────────────────────────
   static const Duration timeout = Duration(seconds: 30);

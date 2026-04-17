@@ -33,6 +33,7 @@ class AppRoutes {
   static String editVacancyPath(int id) => '/company/vacancies/edit/$id';
 
   // Común
-  static const settings = '/settings';
-  static const premium  = '/premium';
+  static const settings        = '/settings';
+  static const premium         = '/premium';
+  static const notificaciones  = '/notificaciones';
 }

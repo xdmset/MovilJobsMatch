@@ -50,43 +50,22 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
   void dispose() { _tabs.dispose(); super.dispose(); }
 
   Future<void> _recargar() async {
-    final id = context.read<AuthProvider>().usuario?.id;
+    final auth = context.read<AuthProvider>();
+    final id = auth.usuario?.id;
     if (id != null) {
       final p = context.read<StudentProvider>();
-      await p.cargarHistorial(id);
+      // Matches depende del historial para enriquecer datos de vacante;
+      // los demás son independientes — cargar en paralelo y matches después.
+      await Future.wait([
+        p.cargarPendientes(id),
+        p.cargarRechazadoPorEmpresa(id),
+        p.cargarAceptadas(id),
+      ]);
       await p.cargarMatches(id);
     }
   }
 
   // ── Lógica de clasificación ───────────────────────────────────────────────
-
-  Set<int> _matchIds(StudentProvider p) => p.matches.map((m) {
-    final vacante = m['vacante'] as Map<String, dynamic>?;
-    return vacante?['id'] as int? ?? m['vacante_id'] as int?;
-  }).whereType<int>().toSet();
-
-  List<Map<String, dynamic>> _getLikesEstudiante(StudentProvider p) {
-    final ids = _matchIds(p);
-    return p.historial.where((h) {
-      final leDioLike = h['le_dio_like'] as bool? ?? false;
-      final tipo      = h['tipo'] as String? ?? '';
-      final esMatch   = h['match'] as bool? ?? false;
-      final id        = h['id'] as int?;
-      return (leDioLike || tipo == 'like') && !esMatch && !ids.contains(id);
-    }).toList();
-  }
-
-  List<Map<String, dynamic>> _getSinRespuesta(StudentProvider p) =>
-      _getLikesEstudiante(p).where((h) {
-        final estado = (h['estado'] as String? ?? 'activa').toLowerCase();
-        return estado == 'activa' || estado == 'pausada' || estado.isEmpty;
-      }).toList();
-
-  List<Map<String, dynamic>> _getRechazadas(StudentProvider p) =>
-      _getLikesEstudiante(p).where((h) {
-        final estado = (h['estado'] as String? ?? 'activa').toLowerCase();
-        return estado == 'cerrada' || estado == 'inactiva' || estado == 'archivada';
-      }).toList();
 
   @override
   Widget build(BuildContext context) {
@@ -98,7 +77,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Mis postulaciones'),
             if (totalMatches > 0)
-              Text('$totalMatches match${totalMatches == 1 ? '' : 'es'}',
+              Text('$totalMatches match${totalMatches == 1 ? '' : 'es'} confirmado${totalMatches == 1 ? '' : 's'}',
                   style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.accentGreen, fontWeight: FontWeight.w600)),
           ]);
@@ -120,7 +99,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
               ]),
             )),
             Consumer<StudentProvider>(builder: (_, p, __) {
-              final count = _getSinRespuesta(p).length;
+              final count = p.pendientes.length;
               return Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
                 const Icon(Icons.hourglass_empty_outlined, size: 15),
                 const SizedBox(width: 5),
@@ -128,31 +107,28 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
               ]));
             }),
             Consumer<StudentProvider>(builder: (_, p, __) {
-              final count = _getRechazadas(p).length;
+              final count = p.rechazadasPorEmpresa.length;
               return Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
                 const Icon(Icons.cancel_outlined, size: 15),
                 const SizedBox(width: 5),
-                Text('Cerradas ($count)'),
+                Text('Rechazadas ($count)'),
               ]));
             }),
           ],
         ),
       ),
       body: Consumer<StudentProvider>(builder: (context, p, _) {
-        if (p.cargandoHistorial && p.historial.isEmpty) {
+        if (p.cargandoHistorial && p.matches.isEmpty && p.pendientes.isEmpty) {
           return const Center(child: CircularProgressIndicator());
         }
 
         return RefreshIndicator(
           onRefresh: _recargar,
-          child: TabBarView(
-            controller: _tabs,
-            children: [
-              _buildMatchesTab(context, p.matches),
-              _buildSinRespuestaTab(context, _getSinRespuesta(p)),
-              _buildRechazadasTab(context, _getRechazadas(p)),
-            ],
-          ),
+          child: TabBarView(controller: _tabs, children: [
+            _buildMatchesTab(context, p.matches),
+            _buildPendientesTab(context, p.pendientes),
+            _buildRechazadasTab(context, p.rechazadasPorEmpresa),
+          ]),
         );
       }),
     );
@@ -162,6 +138,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
   // TAB 1: MATCHES
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildMatchesTab(BuildContext context, List<Map<String, dynamic>> matches) {
+
     if (matches.isEmpty) {
       return _buildEmpty(
         '¡Aún no tienes matches!',
@@ -194,10 +171,6 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                      ?? match['empresa_foto_url']   as String?;
     final empSector   = vacante['empresa_sector']   as String?
                      ?? match['empresa_sector']     as String?;
-    final esPremium   = context.read<AuthProvider>().usuario?.esPremium ?? false;
-    // postulacion_id puede venir del match o del vacante enriquecido
-    final postulacionId = match['postulacion_id'] as int?
-        ?? vacante['postulacion_id'] as int?;
 
     String salario = '';
     if (minS != null && maxS != null) {
@@ -229,7 +202,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
           child: Row(children: [
             const Icon(Icons.favorite, size: 16, color: AppColors.accentGreen),
             const SizedBox(width: 8),
-            Text('¡Match! 🎉', style: AppTextStyles.subtitle1.copyWith(
+            Text('Match', style: AppTextStyles.subtitle1.copyWith(
                 color: AppColors.accentGreen, fontWeight: FontWeight.bold)),
             const Spacer(),
             if (fechaMatch.isNotEmpty)
@@ -286,10 +259,6 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                 )),
               ]),
             ),
-            const SizedBox(height: 12),
-            _buildBotonRetro(context, vacante, esPremium,
-                postulacionId: postulacionId,
-                contextoPrompt: 'match — la empresa también los eligió'),
           ]),
         ),
       ]),
@@ -300,7 +269,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
   // ══════════════════════════════════════════════════════════════════════════
   // TAB 2: SIN RESPUESTA
   // ══════════════════════════════════════════════════════════════════════════
-  Widget _buildSinRespuestaTab(BuildContext context, List<Map<String, dynamic>> lista) {
+  Widget _buildPendientesTab(BuildContext context, List<Map<String, dynamic>> lista) {
     if (lista.isEmpty) {
       return _buildEmpty(
         'Sin postulaciones pendientes',
@@ -328,9 +297,6 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     final empNombre   = v['empresa_nombre']   as String? ?? 'Empresa';
     final empFotoUrl  = v['empresa_foto_url'] as String?;
     final empSector   = v['empresa_sector']   as String?;
-    final esPremium   = context.read<AuthProvider>().usuario?.esPremium ?? false;
-    final postulacionId = v['postulacion_id'] as int?;
-
     String salario = '';
     if (minS != null && maxS != null) {
       salario = '\$${_fmt(minS)} – \$${_fmt(maxS)} $moneda';
@@ -393,9 +359,6 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                       color: AppColors.textTertiary, height: 1.4)),
             ],
             const SizedBox(height: 12),
-            _buildBotonRetro(context, v, esPremium,
-                postulacionId: postulacionId,
-                contextoPrompt: 'postulación enviada, empresa aún no ha respondido'),
           ]),
         ),
       ]),
@@ -409,8 +372,8 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
   Widget _buildRechazadasTab(BuildContext context, List<Map<String, dynamic>> lista) {
     if (lista.isEmpty) {
       return _buildEmpty(
-        'Sin vacantes cerradas',
-        'Las vacantes donde postulaste pero que ya cerraron aparecerán aquí.',
+        'Sin rechazos por empresa',
+        'Si una empresa no te selecciona para una vacante, aparecerá aquí con retroalimentación.',
         Icons.cancel_outlined,
         AppColors.error,
       );
@@ -462,7 +425,7 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
           child: Row(children: [
             const Icon(Icons.cancel_outlined, size: 14, color: AppColors.error),
             const SizedBox(width: 6),
-            Text('Vacante cerrada',
+            Text('Rechazado por empresa',
                 style: AppTextStyles.bodySmall.copyWith(
                     color: AppColors.error, fontWeight: FontWeight.w600)),
             const Spacer(),
@@ -515,8 +478,11 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
                 const Icon(Icons.lightbulb_outline, size: 14, color: AppColors.primaryPurple),
                 const SizedBox(width: 8),
                 Expanded(child: Text(
-                  'Esta vacante ya cerró. Con Premium obtienes un plan de acción '
-                  'personalizado con IA para mejorar tu perfil.',
+                  esPremium
+                    ? 'La empresa dejó retroalimentación. '
+                      'Con Premium puedes ver el informe de IA con tu plan de mejora.'
+                    : 'La empresa rechazó tu postulación. '
+                      'Con Premium obtienes el informe de IA con áreas de mejora y roadmap personalizado.',
                   style: AppTextStyles.bodySmall.copyWith(
                       color: AppColors.textSecondary, height: 1.4),
                 )),
@@ -524,11 +490,10 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
             ),
             const SizedBox(height: 12),
 
-            // Tab de Cerradas: es donde más valor tiene el roadmap
             _buildBotonRetro(context, v, esPremium,
                 postulacionId: postulacionId,
-                contextoPrompt: 'la vacante ya cerró sin que hubiera match',
-                labelBoton: 'Ver plan de acción IA'),
+                contextoPrompt: 'la empresa rechazó la postulación del estudiante',
+                labelBoton: 'Ver por qué me rechazaron'),
           ]),
         ),
       ]),
@@ -615,6 +580,47 @@ class _ApplicationsScreenState extends State<ApplicationsScreen>
     int? postulacionId,
     String? contextoPrompt,
   ) {
+    if (postulacionId == null) {
+      // Sin postulación no hay feedback del backend — mostrar aviso
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (_) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 40, height: 4,
+                decoration: BoxDecoration(color: AppColors.borderLight,
+                    borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                  color: AppColors.accentOrange.withOpacity(0.1),
+                  shape: BoxShape.circle),
+              child: const Icon(Icons.info_outline,
+                  color: AppColors.accentOrange, size: 32),
+            ),
+            const SizedBox(height: 16),
+            Text('Sin retroalimentación disponible',
+                style: AppTextStyles.subtitle1.copyWith(fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 10),
+            Text(
+              'Esta empresa rechazó tu solicitud sin postulación formal, '
+              'por lo que no hay feedback disponible.',
+              style: AppTextStyles.bodyMedium.copyWith(
+                  color: AppColors.textSecondary, height: 1.5),
+              textAlign: TextAlign.center,
+            ),
+          ]),
+        ),
+      );
+      return;
+    }
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -751,6 +757,7 @@ class _RetroSheetState extends State<_RetroSheet> {
 
   // Estado de carga
   bool _cargando = true;
+  bool _generandoRoadmap = false;
   String _fase = 'Cargando retroalimentación...';
   RetroalimentacionRead? _retro;
 
@@ -758,6 +765,24 @@ class _RetroSheetState extends State<_RetroSheet> {
   void initState() {
     super.initState();
     _cargar();
+  }
+
+  Future<void> _generarRoadmap() async {
+    if (widget.postulacionId == null) return;
+    debugPrint('[RetroSheet] _generarRoadmap → postulacion=${widget.postulacionId}');
+    setState(() => _generandoRoadmap = true);
+    final retro = await _retroRepo.generarRoadmap(widget.postulacionId!);
+    debugPrint('[RetroSheet] generarRoadmap resultado: ${retro == null ? 'null' : 'estado=${retro.roadmapEstado}'}');
+    if (mounted) {
+      setState(() {
+        _generandoRoadmap = false;
+        if (retro != null) _retro = retro;
+      });
+      if (retro != null && retro.roadmapPendiente) {
+        debugPrint('[RetroSheet] roadmap pendiente → iniciando polling via _cargar()');
+        await _cargar();
+      }
+    }
   }
 
   Future<void> _cargar() async {
@@ -967,6 +992,52 @@ class _RetroSheetState extends State<_RetroSheet> {
         ],
       ],
 
+      // Roadmap con error o no generado aún — botón para generarlo / reintentar
+      if (!retro.roadmapListo && !retro.roadmapPendiente && widget.postulacionId != null) ...[
+        _seccionHeader('Plan de acción IA', Icons.auto_awesome, AppColors.primaryPurple),
+        const SizedBox(height: 12),
+        if (retro.roadmapError) ...[
+          Container(
+            padding: const EdgeInsets.all(14),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.error.withValues(alpha: 0.3))),
+            child: const Row(children: [
+              Icon(Icons.error_outline, color: AppColors.error, size: 20),
+              SizedBox(width: 10),
+              Expanded(child: Text(
+                'Hubo un problema al generar el plan. Puedes intentarlo de nuevo.',
+                style: TextStyle(color: AppColors.error, fontSize: 13),
+              )),
+            ]),
+          ),
+        ],
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _generandoRoadmap ? null : _generarRoadmap,
+            icon: _generandoRoadmap
+                ? const SizedBox(width: 16, height: 16,
+                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : Icon(retro.roadmapError ? Icons.refresh : Icons.auto_awesome, size: 16),
+            label: Text(_generandoRoadmap
+                ? 'Generando plan...'
+                : retro.roadmapError
+                    ? 'Reintentar generación'
+                    : 'Generar plan de acción personalizado'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryPurple,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+      ],
+
       // Si roadmap está pendiente (debería haberse resuelto con polling, pero por si acaso)
       if (retro.roadmapPendiente)
         Container(
@@ -1161,9 +1232,9 @@ class _DetalleVacanteSheet extends StatelessWidget {
 
     String lModal(String m) {
       switch (m) {
-        case 'remoto':     return '🌐 Remoto';
-        case 'presencial': return '🏢 Presencial';
-        case 'hibrido':    return '🔀 Híbrido';
+        case 'remoto':     return 'Remoto';
+        case 'presencial': return 'Presencial';
+        case 'hibrido':    return 'Híbrido';
         default:           return m;
       }
     }
@@ -1272,9 +1343,9 @@ class _DetalleVacanteSheet extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Wrap(spacing: 8, runSpacing: 8, children: [
                 if (modalidad.isNotEmpty) _chipDetalle(lModal(modalidad), accentColor),
-                if (ubicacion.isNotEmpty) _chipDetalle('📍 $ubicacion', AppColors.accentBlue),
-                if (salario.isNotEmpty)   _chipDetalle('💰 $salario', AppColors.accentGreen),
-                if (contrato.isNotEmpty)  _chipDetalle('📋 $contrato', AppColors.accentOrange),
+                if (ubicacion.isNotEmpty) _chipDetalle(ubicacion, AppColors.accentBlue),
+                if (salario.isNotEmpty)   _chipDetalle(salario, AppColors.accentGreen),
+                if (contrato.isNotEmpty)  _chipDetalle(contrato, AppColors.accentOrange),
               ]),
               const SizedBox(height: 20),
 

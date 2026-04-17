@@ -30,11 +30,14 @@ import '../presentation/screens/student/premium/student_premium_screen.dart';
 import '../presentation/screens/company/settings/company_settings_screen.dart';
 import '../presentation/screens/company/premium/company_premium_screen.dart';
 import '../presentation/providers/auth_provider.dart';
-
+import '../presentation/screens/common/notificaciones_screen.dart';
 
 
 class AppRouter {
+  static final navigatorKey = GlobalKey<NavigatorState>();
+
   static final GoRouter router = GoRouter(
+    navigatorKey: navigatorKey,
     initialLocation: AppRoutes.splash,
     debugLogDiagnostics: true,
     routes: [
@@ -114,6 +117,12 @@ class AppRouter {
           builder: (_, __) => const CompanySettingsScreen()),
       GoRoute(path: AppRoutes.companyPremium,
           builder: (_, __) => const CompanyPremiumScreen()),
+
+      // ── Notificaciones ───────────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.notificaciones,
+        builder: (_, __) => const NotificacionesScreen(),
+      ),
 
       // ── Común ─────────────────────────────────────────────────────────────
       // Settings y Premium ahora redirigen según el rol del usuario

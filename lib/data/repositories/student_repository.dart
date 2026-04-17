@@ -45,7 +45,7 @@ class StudentRepository {
       debugPrint('[StudentRepo] feed: ${lista.length} vacantes');
       final vacantes = lista.cast<Map<String, dynamic>>();
       // Enriquecer con datos de empresa en paralelo
-      return await _enriquecerConEmpresa(vacantes);
+      return await enriquecerConEmpresa(vacantes);
     } catch (e) {
       debugPrint('[StudentRepo] getVacantesFeed error: $e');
       return [];
@@ -66,12 +66,12 @@ class StudentRepository {
     final raw = await _api.get('/vacante/', query: query, auth: true);
     final lista = raw is List ? raw : (raw['data'] as List? ?? []);
     final vacantes = lista.cast<Map<String, dynamic>>();
-    return await _enriquecerConEmpresa(vacantes);
+    return await enriquecerConEmpresa(vacantes);
   }
 
   // ── Enriquecer vacantes con nombre y foto de empresa ─────────────────────
   // Agrupa por empresa_id y hace una sola llamada por empresa (con cache)
-  Future<List<Map<String, dynamic>>> _enriquecerConEmpresa(
+  Future<List<Map<String, dynamic>>> enriquecerConEmpresa(
       List<Map<String, dynamic>> vacantes) async {
     if (vacantes.isEmpty) return vacantes;
 
@@ -148,7 +148,7 @@ class StudentRepository {
     try {
       final raw = await _api.get('/vacante/$vacanteId', auth: true);
       if (raw is! Map<String, dynamic>) return null;
-      final lista = await _enriquecerConEmpresa([raw]);
+      final lista = await enriquecerConEmpresa([raw]);
       return lista.isNotEmpty ? lista.first : null;
     } catch (e) {
       debugPrint('[StudentRepo] getVacanteById $vacanteId error: $e');
@@ -239,6 +239,113 @@ class StudentRepository {
       return lista.cast<Map<String, dynamic>>();
     } catch (e) {
       debugPrint('[StudentRepo] getMatches error: $e');
+      return [];
+    }
+  }
+
+  // ── NUEVOS ENDPOINTS DE SWIPES ESPECÍFICOS ────────────────────────────────
+  // Estos endpoints reemplazan el historial genérico con vistas específicas
+
+  /// GET /swipes/{estudiante_id}/likes - Vacantes donde dio like
+  Future<List<Map<String, dynamic>>> getLikesEstudiante(int estudianteId) async {
+    try {
+      final raw = await _api.get(
+          '/swipes/$estudianteId/likes', 
+          query: {'skip': '0', 'limit': '100'},
+          auth: true);
+      final lista = raw is List ? raw : (raw['data'] as List? ?? []);
+      debugPrint('[StudentRepo] getLikesEstudiante: ${lista.length}');
+      return lista.cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('[StudentRepo] getLikesEstudiante error: $e');
+      return [];
+    }
+  }
+
+  /// GET /swipes/{estudiante_id}/rechazadas - Vacantes que rechazó
+  Future<List<Map<String, dynamic>>> getRechazadasEstudiante(int estudianteId) async {
+    try {
+      final raw = await _api.get(
+          '/swipes/$estudianteId/rechazadas',
+          query: {'skip': '0', 'limit': '100'},
+          auth: true);
+      final lista = raw is List ? raw : (raw['data'] as List? ?? []);
+      debugPrint('[StudentRepo] getRechazadasEstudiante: ${lista.length}');
+      return lista.cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('[StudentRepo] getRechazadasEstudiante error: $e');
+      return [];
+    }
+  }
+
+  /// GET /swipes/{estudiante_id}/pendientes - Vacantes esperando respuesta
+  Future<List<Map<String, dynamic>>> getPendientesEstudiante(int estudianteId) async {
+    try {
+      final raw = await _api.get(
+          '/swipes/$estudianteId/pendientes',
+          query: {'skip': '0', 'limit': '100'},
+          auth: true);
+      final lista = raw is List ? raw : (raw['data'] as List? ?? []);
+      debugPrint('[StudentRepo] getPendientesEstudiante: ${lista.length}');
+      return lista.cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('[StudentRepo] getPendientesEstudiante error: $e');
+      return [];
+    }
+  }
+
+  /// GET /swipes/{estudiante_id}/rechazado-por-empresa - Rechazado por empresa
+  Future<List<Map<String, dynamic>>> getRechazadoPorEmpresa(int estudianteId) async {
+    try {
+      final raw = await _api.get(
+          '/swipes/$estudianteId/rechazado-por-empresa',
+          query: {'skip': '0', 'limit': '100'},
+          auth: true);
+      final lista = raw is List ? raw : (raw['data'] as List? ?? []);
+      debugPrint('[StudentRepo] getRechazadoPorEmpresa: ${lista.length}');
+      return lista.cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('[StudentRepo] getRechazadoPorEmpresa error: $e');
+      return [];
+    }
+  }
+
+  /// GET /swipes/{estudiante_id}/aceptadas - Matches confirmados
+  Future<List<Map<String, dynamic>>> getAceptadasEstudiante(int estudianteId) async {
+    try {
+      final raw = await _api.get(
+          '/swipes/$estudianteId/aceptadas',
+          query: {'skip': '0', 'limit': '100'},
+          auth: true);
+      final lista = raw is List ? raw : (raw['data'] as List? ?? []);
+      debugPrint('[StudentRepo] getAceptadasEstudiante: ${lista.length}');
+      return lista.cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('[StudentRepo] getAceptadasEstudiante error: $e');
+      return [];
+    }
+  }
+
+  /// GET /postulaciones/estudiante/{estudiante_id} — postulaciones del estudiante
+  /// Opcional: filtrar por estado ("rechazada", "aceptada", "pendiente", etc.)
+  Future<List<Map<String, dynamic>>> getPostulacionesEstudiante(
+    int estudianteId, {
+    String? estado,
+  }) async {
+    try {
+      final query = <String, String>{
+        if (estado != null) 'estado': estado,
+      };
+      final raw = await _api.get(
+        '/postulaciones/estudiante/$estudianteId',
+        query: query.isEmpty ? null : query,
+        auth: true,
+      );
+      final lista = raw is List ? raw : (raw['data'] as List? ?? []);
+      debugPrint('[StudentRepo] postulaciones estudiante (estado=$estado): ${lista.length}');
+      return lista.cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('[StudentRepo] getPostulacionesEstudiante error: $e');
       return [];
     }
   }

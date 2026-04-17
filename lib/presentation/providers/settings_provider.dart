@@ -4,44 +4,45 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/errors/api_exceptions.dart';
 import '../../data/repositories/user_repository.dart';
+import 'package:jobmatch_app/data/services/notification_service.dart';
 
 class SettingsProvider extends ChangeNotifier {
   final _repo = UserRepository.instance;
 
   // ── Preferencias locales ──────────────────────────────────────────────────
-  bool _pushNotifications   = true;
-  bool _emailNotifications  = true;
-  bool _matchNotifications  = true;
-  bool _profileVisibility   = true;
-  bool _showOnlineStatus    = false;
-  String _language          = 'Español';
-  String _theme             = 'Sistema';
+  bool _pushNotifications = true;
+  bool _emailNotifications = true;
+  bool _matchNotifications = true;
+  bool _profileVisibility = true;
+  bool _showOnlineStatus = false;
+  String _language = 'Español';
+  String _theme = 'Sistema';
 
-  bool get pushNotifications   => _pushNotifications;
-  bool get emailNotifications  => _emailNotifications;
-  bool get matchNotifications  => _matchNotifications;
-  bool get profileVisibility   => _profileVisibility;
-  bool get showOnlineStatus    => _showOnlineStatus;
-  String get language          => _language;
-  String get theme             => _theme;
+  bool get pushNotifications => _pushNotifications;
+  bool get emailNotifications => _emailNotifications;
+  bool get matchNotifications => _matchNotifications;
+  bool get profileVisibility => _profileVisibility;
+  bool get showOnlineStatus => _showOnlineStatus;
+  String get language => _language;
+  String get theme => _theme;
 
   // ── Estado de cuenta ──────────────────────────────────────────────────────
   bool _deletingAccount = false;
   String? _error;
 
   bool get deletingAccount => _deletingAccount;
-  String? get error        => _error;
+  String? get error => _error;
 
   // ── Cargar preferencias guardadas ─────────────────────────────────────────
   Future<void> cargarPreferencias() async {
     final prefs = await SharedPreferences.getInstance();
-    _pushNotifications  = prefs.getBool('jm_push_notif')   ?? true;
-    _emailNotifications = prefs.getBool('jm_email_notif')  ?? true;
-    _matchNotifications = prefs.getBool('jm_match_notif')  ?? true;
-    _profileVisibility  = prefs.getBool('jm_profile_vis')  ?? true;
-    _showOnlineStatus   = prefs.getBool('jm_online_status')  ?? false;
-    _language           = prefs.getString('jm_language')   ?? 'Español';
-    _theme              = prefs.getString('jm_theme')       ?? 'Sistema';
+    _pushNotifications = prefs.getBool('jm_push_notif') ?? true;
+    _emailNotifications = prefs.getBool('jm_email_notif') ?? true;
+    _matchNotifications = prefs.getBool('jm_match_notif') ?? true;
+    _profileVisibility = prefs.getBool('jm_profile_vis') ?? true;
+    _showOnlineStatus = prefs.getBool('jm_online_status') ?? false;
+    _language = prefs.getString('jm_language') ?? 'Español';
+    _theme = prefs.getString('jm_theme') ?? 'Sistema';
     notifyListeners();
   }
 
@@ -51,6 +52,11 @@ class SettingsProvider extends ChangeNotifier {
     notifyListeners();
     final p = await SharedPreferences.getInstance();
     await p.setBool('jm_push_notif', v);
+    if (v) {
+      await NotificationService.registerToken();
+    } else {
+      await NotificationService.unregisterToken();
+    }
   }
 
   Future<void> setEmailNotifications(bool v) async {

@@ -42,18 +42,19 @@ class CompanyProvider extends ChangeNotifier {
       .toList();
 
   // ── Helpers de estado (espejo de candidates_screen) ───────────────────────
-  // El backend devuelve: "pendiente" | "aceptada" | "rechazada" | "entrevista"
-  // Localmente el provider puede marcar: "match" | "aceptado" | "rechazado"
+  // El backend devuelve: "pendiente" | "aceptada" | "rechazada" | "entrevista" | "enviado"
+  // Localmente el provider puede marcar: "match" | "aceptado" | "rechazado" | "enviado"
   bool _esMatch(Map<String, dynamic> post) {
     final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
     if (estado == 'match') return true;
+    if (estado == 'enviado') return true; // Nuevo estado para postulaciones creadas
     final matchId = post['match_id'];
     return matchId != null && matchId != 0 && estado == 'pendiente';
   }
 
   bool _esAceptada(Map<String, dynamic> post) {
     final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
-    return estado == 'aceptada' || estado == 'aceptado';
+    return estado == 'aceptada' || estado == 'aceptado' || estado == 'entrevista';
   }
 
   bool _esRechazada(Map<String, dynamic> post) {
@@ -139,12 +140,41 @@ class CompanyProvider extends ChangeNotifier {
   // Compatibilidad con código anterior
   Future<void> recargarPostulaciones(int userId) => recargarCandidatos(userId);
 
+  /// Recarga SOLO las postulaciones desde el backend sin tocar el feed.
+  /// Útil justo después de un swipe para obtener el id real de la postulación
+  /// sin el overhead de recargar también el candidatosFeed.
+  Future<void> recargarSoloPostulaciones(int userId) async {
+    try {
+      final lista = await _repo.getPostulaciones(userId);
+      _postulaciones = _enriquecerPostulaciones(lista);
+      debugPrint('[CompanyProvider] recargarSoloPostulaciones: '
+          '${_postulaciones.length} postulaciones '
+          '(matches=$matches aceptados=$aceptados rechazados=$rechazados)');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[CompanyProvider] recargarSoloPostulaciones error: $e');
+    }
+  }
+
   Future<void> recargarVacantes(int userId) async {
     try {
       _vacantes = await _repo.getHistorialVacantes(userId);
       notifyListeners();
     } catch (e) {
       debugPrint('[CompanyProvider] recargarVacantes: $e');
+    }
+  }
+
+  /// Cargar candidatos rechazados desde endpoint de estado (que trae perfil_estudiante)
+  Future<List<Map<String, dynamic>>> cargarRechazados(int empresaId) async {
+    try {
+      final lista = await _repo.getCandidatosPorEstado(empresaId, 'rechazados');
+      _guardarSnapshots(lista);
+      debugPrint('[CompanyProvider] rechazados: ${lista.length}');
+      return lista;
+    } catch (e) {
+      debugPrint('[CompanyProvider] cargarRechazados error: $e');
+      return [];
     }
   }
 
@@ -256,9 +286,8 @@ class CompanyProvider extends ChangeNotifier {
       });
 
       // Agregar/actualizar en postulaciones para reflejo inmediato en tabs
-      // FIX: usar estados que coincidan con los que el API devuelve para
-      // que _esMatch/_esAceptada/_esRechazada los reconozcan correctamente.
-      final estadoLocal = match != null ? 'match' : (interes ? 'aceptada' : 'rechazada');
+      // Usar estados que coincidan con los que el API devuelve
+      final estadoLocal = match != null ? 'enviado' : (interes ? 'enviado' : 'rechazada');
       final idx = _postulaciones.indexWhere(
           (p) => _normalizarInt(p['estudiante_id']) == estudianteId
               && _normalizarInt(p['vacante_id']) == vacanteId);
@@ -277,6 +306,7 @@ class CompanyProvider extends ChangeNotifier {
           'estado':         estadoLocal,
           'source':         'swipe',
           'fecha_creacion': DateTime.now().toIso8601String(),
+          if (match != null) 'match_id': match['id'],
         });
       }
 
@@ -288,20 +318,224 @@ class CompanyProvider extends ChangeNotifier {
     }
   }
 
+  // ── Rechazar candidato con retroalimentación ──────────────────────────────
+  /// Flujo completo de rechazo:
+  /// 1. Swipe negativo → POST /swipes/empresa/{id}
+  /// 2. Buscar postulacion_id → GET /postulaciones/empresa/{id}
+  /// 3. Si existe postulación: PUT /postulaciones/{id}/estado → "rechazada"
+  /// 4. Si existe postulación y hay feedback: POST /retroalimentacion/
+  /// 5. Generar roadmap (no bloqueante)
+  /// Retorna (exito, retroCreada).
+  /// exito=true si el swipe negativo se registró.
+  /// retroCreada=true si además se guardó la retroalimentación.
+  Future<({bool exito, bool retroCreada})> rechazarCandidato({
+    required int empresaId,
+    required int estudianteId,
+    required int vacanteId,
+    required String camposMejora,
+    String? sugerenciasPerfil,
+  }) async {
+    debugPrint('[CompanyProvider] rechazarCandidato START '
+        'emp=$empresaId est=$estudianteId vac=$vacanteId');
+    try {
+      // 1. Swipe negativo
+      await _repo.swipeEstudiante(
+        empresaId:    empresaId,
+        estudianteId: estudianteId,
+        vacanteId:    vacanteId,
+        interes:      false,
+      );
+      debugPrint('[CompanyProvider] ✓ swipe negativo enviado');
+
+      // 2. Buscar postulacion_id
+      final postulacionId = await _repo.buscarPostulacionId(
+        empresaId:    empresaId,
+        estudianteId: estudianteId,
+        vacanteId:    vacanteId,
+      );
+      debugPrint('[CompanyProvider] postulacion_id encontrado: $postulacionId');
+
+      // 2b. Si no hay postulación formal, crearla para poder adjuntar retro
+      int? postId = postulacionId;
+      if (postId == null && camposMejora.isNotEmpty) {
+        debugPrint('[CompanyProvider] no existe postulación — creando una vía web');
+        postId = await _repo.crearPostulacionWeb(
+          estudianteId: estudianteId,
+          vacanteId:    vacanteId,
+        );
+        debugPrint('[CompanyProvider] postulacion_id creado: $postId');
+      }
+
+      if (postId != null) {
+        // 3. Cambiar estado a rechazada
+        try {
+          await _repo.cambiarEstadoConFeedback(
+            postId, 'rechazada',
+            camposMejora:      camposMejora.isNotEmpty ? camposMejora : null,
+            sugerenciasPerfil: sugerenciasPerfil,
+          );
+          debugPrint('[CompanyProvider] ✓ estado cambiado a rechazada');
+        } catch (e) {
+          debugPrint('[CompanyProvider] cambiarEstado error (no bloqueante): $e');
+        }
+
+        // 4. Crear retroalimentación independiente (si hay texto)
+        bool retroCreada = false;
+        if (camposMejora.isNotEmpty) {
+          try {
+            await _repo.crearRetroalimentacion(
+              postulacionId:     postId,
+              camposMejora:      camposMejora,
+              sugerenciasPerfil: sugerenciasPerfil,
+            );
+            retroCreada = true;
+            debugPrint('[CompanyProvider] ✓ retroalimentación creada');
+
+            // 5. Generar roadmap (no bloqueante)
+            try {
+              await _repo.generarRoadmap(postId);
+              debugPrint('[CompanyProvider] ✓ roadmap generado');
+            } catch (e) {
+              debugPrint('[CompanyProvider] generarRoadmap (no bloqueante): $e');
+            }
+          } catch (e) {
+            debugPrint('[CompanyProvider] crearRetroalimentacion error: $e');
+          }
+        } else {
+          debugPrint('[CompanyProvider] sin texto de feedback — omitiendo retro');
+        }
+
+        _candidatosFeed.removeWhere((c) {
+          final cEst = _normalizarInt(c['estudiante_id'] ?? c['usuario_id']);
+          final cVac = _normalizarInt(c['vacante_id']);
+          return cEst == estudianteId && cVac == vacanteId;
+        });
+        debugPrint('[CompanyProvider] ✓ rechazarCandidato DONE retroCreada=$retroCreada');
+        notifyListeners();
+        return (exito: true, retroCreada: retroCreada);
+      } else {
+        debugPrint('[CompanyProvider] sin postulacion_id — no se puede crear retroalimentación');
+        _candidatosFeed.removeWhere((c) {
+          final cEst = _normalizarInt(c['estudiante_id'] ?? c['usuario_id']);
+          final cVac = _normalizarInt(c['vacante_id']);
+          return cEst == estudianteId && cVac == vacanteId;
+        });
+        notifyListeners();
+        return (exito: true, retroCreada: false);
+      }
+    } catch (e) {
+      debugPrint('[CompanyProvider] rechazarCandidato error: $e');
+      return (exito: false, retroCreada: false);
+    }
+  }
+
+  // ── Arrepentirse: re-swipear un candidato ────────────────────────────────
+  /// Envía swipe positivo a un candidato que ya fue rechazado (o negativo a uno aceptado).
+  /// Retorna true si el swipe se registró correctamente.
+  Future<bool> reswipeCandidato({
+    required int empresaId,
+    required int estudianteId,
+    required int vacanteId,
+    required bool interes,
+  }) async {
+    debugPrint('[CompanyProvider] reswipe est=$estudianteId vac=$vacanteId interes=$interes');
+    try {
+      await _repo.swipeEstudiante(
+        empresaId:    empresaId,
+        estudianteId: estudianteId,
+        vacanteId:    vacanteId,
+        interes:      interes,
+      );
+      debugPrint('[CompanyProvider] ✓ reswipe registrado');
+      return true;
+    } catch (e) {
+      debugPrint('[CompanyProvider] reswipe error: $e');
+      return false;
+    }
+  }
+
+  // ── Enviar feedback a candidato rechazado ────────────────────────────────
+  /// Busca la postulacion_id y crea retroalimentación + roadmap.
+  /// Retorna (encontrado, retroCreada).
+  Future<({bool encontrado, bool retroCreada})> enviarFeedbackRechazado({
+    required int empresaId,
+    required int estudianteId,
+    required int vacanteId,
+    required String camposMejora,
+    String? sugerenciasPerfil,
+  }) async {
+    debugPrint('[CompanyProvider] enviarFeedback est=$estudianteId vac=$vacanteId');
+    final postId = await _repo.buscarPostulacionId(
+      empresaId:    empresaId,
+      estudianteId: estudianteId,
+      vacanteId:    vacanteId,
+    );
+    if (postId == null) {
+      debugPrint('[CompanyProvider] enviarFeedback → sin postulacion_id');
+      return (encontrado: false, retroCreada: false);
+    }
+    try {
+      await _repo.crearRetroalimentacion(
+        postulacionId:     postId,
+        camposMejora:      camposMejora,
+        sugerenciasPerfil: sugerenciasPerfil,
+      );
+      debugPrint('[CompanyProvider] ✓ feedback creado postulacion=$postId');
+      try {
+        await _repo.generarRoadmap(postId);
+        debugPrint('[CompanyProvider] ✓ roadmap generado');
+      } catch (e) {
+        debugPrint('[CompanyProvider] generarRoadmap (no bloqueante): $e');
+      }
+      return (encontrado: true, retroCreada: true);
+    } catch (e) {
+      debugPrint('[CompanyProvider] enviarFeedback crearRetro error: $e');
+      return (encontrado: true, retroCreada: false);
+    }
+  }
+
+  // ── Buscar postulacion_id ────────────────────────────────────────────────
+  Future<int?> buscarPostulacionId({
+    required int empresaId,
+    required int estudianteId,
+    required int vacanteId,
+  }) => _repo.buscarPostulacionId(
+    empresaId: empresaId,
+    estudianteId: estudianteId,
+    vacanteId: vacanteId,
+  );
+
   // ── Retroalimentación ─────────────────────────────────────────────────────
+  /// Crea la retroalimentación y opcionalmente dispara la generación del roadmap.
+  /// Retorna true si la operación fue exitosa.
   Future<bool> crearRetroalimentacion({
     required int postulacionId,
     required String camposMejora,
     String? sugerenciasPerfil,
+    bool generarRoadmap = true,
   }) async {
     try {
       await _repo.crearRetroalimentacion(
-        postulacionId:    postulacionId,
-        camposMejora:     camposMejora,
+        postulacionId:     postulacionId,
+        camposMejora:      camposMejora,
         sugerenciasPerfil: sugerenciasPerfil,
       );
-      debugPrint('[CompanyProvider] retroalimentación enviada ✓ '
+      debugPrint('[CompanyProvider] retroalimentación creada ✓ '
           'postulacion=$postulacionId');
+
+      if (generarRoadmap) {
+        try {
+          // POST /api/v1/retroalimentacion/postulacion/{postulacion_id}/generar-roadmap
+          // Asegúrate de implementar _repo.generarRoadmap(postulacionId) en
+          // CompanyRepository si aún no existe.
+          await _repo.generarRoadmap(postulacionId);
+          debugPrint('[CompanyProvider] roadmap generado ✓ '
+              'postulacion=$postulacionId');
+        } catch (e) {
+          // El roadmap es no-bloqueante: si falla, la retro ya quedó guardada
+          debugPrint('[CompanyProvider] generarRoadmap (no bloqueante): $e');
+        }
+      }
       return true;
     } catch (e) {
       debugPrint('[CompanyProvider] crearRetroalimentacion error: $e');

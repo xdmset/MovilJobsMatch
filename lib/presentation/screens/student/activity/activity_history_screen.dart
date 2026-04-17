@@ -6,6 +6,7 @@ import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_text_styles.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/student_provider.dart';
+import '../../../../data/repositories/retroalimentacion_repository.dart';
 
 class ActivityHistoryScreen extends StatefulWidget {
   const ActivityHistoryScreen({super.key});
@@ -22,6 +23,17 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
     super.initState();
     // 5 tabs: Todo / ❤️ Likes / ✕ Pasé / 🎉 Matches / ✗ Rechazados
     _tabController = TabController(length: 5, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _cargarRechazados());
+  }
+
+  Future<void> _cargarRechazados() async {
+    final userId = context.read<AuthProvider>().usuario?.id;
+    if (userId == null) return;
+    final p = context.read<StudentProvider>();
+    // Solo cargar si aún no hay datos de rechazadas
+    if (p.rechazadasPorEmpresa.isEmpty) {
+      await p.cargarRechazadoPorEmpresa(userId);
+    }
   }
 
   @override
@@ -34,7 +46,10 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
     final userId = context.read<AuthProvider>().usuario?.id;
     if (userId == null) return;
     final p = context.read<StudentProvider>();
-    await p.cargarHistorial(userId);
+    await Future.wait([
+      p.cargarHistorial(userId),
+      p.cargarRechazadoPorEmpresa(userId),
+    ]);
     await p.cargarMatches(userId);
   }
 
@@ -59,19 +74,33 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
     });
   }
 
-  /// Un item fue "rechazado" si la vacante ya cerro (estado cerrada/inactiva)
-  /// y el estudiante habia dado like pero NO hay match.
-  /// FIX: el backend NO expone estado_postulacion en el historial del estudiante,
-  /// se detecta por estado de la vacante + le_dio_like sin match.
+  /// Un item fue "rechazado por empresa" si aparece en rechazadasPorEmpresa del provider.
+  /// También detecta rechazos por estado de la vacante como fallback.
   bool _esRechazado(Map<String, dynamic> item, StudentProvider p) {
     // Si hay match, no es rechazo
     if (_esMatch(item, p)) return false;
     // Si el estudiante no dio like, tampoco es rechazo (es solo dislike)
     final leDioLike = item['le_dio_like'] as bool? ?? (item['tipo'] == 'like');
     if (!leDioLike) return false;
-    // Es rechazo si la vacante ya cerro
-    final estado = (item['estado'] as String? ?? '').toLowerCase();
-    return estado == 'cerrada' || estado == 'inactiva' || estado == 'archivada';
+
+    final vacanteId = item['id'] as int?;
+
+    // Fuente 1: aparece en la lista de rechazadasPorEmpresa (más fiable)
+    if (vacanteId != null) {
+      final enRechazadas = p.rechazadasPorEmpresa.any(
+        (r) => (r['id'] as int?) == vacanteId,
+      );
+      if (enRechazadas) return true;
+    }
+
+    // Fuente 2: estado_interaccion del propio item (de la API de interacciones)
+    final estadoInteraccion = (item['estado_interaccion'] as String? ?? '').toLowerCase();
+    if (estadoInteraccion == 'rechazado' ||
+        estadoInteraccion == 'rechazado_por_empresa') return true;
+
+    // Fuente 3 (fallback): vacante cerrada/inactiva
+    final estadoVacante = (item['estado'] as String? ?? '').toLowerCase();
+    return estadoVacante == 'cerrada' || estadoVacante == 'inactiva' || estadoVacante == 'archivada';
   }
 
   @override
@@ -447,21 +476,23 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
                   ]),
                 )),
               if (esRechazado)
-                Expanded(child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.error.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(8),
+                Expanded(child: GestureDetector(
+                  onTap: () => _showRetroActivity(context, item, p),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.error.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center, children: [
+                      Icon(Icons.info_outline, size: 14, color: AppColors.error),
+                      SizedBox(width: 4),
+                      Text('Ver feedback', style: TextStyle(
+                          fontSize: 12, color: AppColors.error,
+                          fontWeight: FontWeight.w600)),
+                    ]),
                   ),
-                  child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Icon(Icons.info_outline, size: 14,
-                        color: AppColors.error),
-                    SizedBox(width: 4),
-                    Text('Ver feedback', style: TextStyle(
-                        fontSize: 12, color: AppColors.error,
-                        fontWeight: FontWeight.w600)),
-                  ]),
                 )),
               if (!isLike && !esRechazado) ...[
                 Expanded(child: ElevatedButton.icon(
@@ -483,6 +514,69 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
           ),
         ]),
       ),
+    );
+  }
+
+  // ── Retro sheet para items rechazados ────────────────────────────────────
+  void _showRetroActivity(BuildContext context, Map<String, dynamic> item,
+      StudentProvider p) {
+    final vacanteId = item['id'] as int?;
+    // Buscar postulacion_id desde la lista de rechazadasPorEmpresa
+    int? postulacionId;
+    if (vacanteId != null) {
+      final match = p.rechazadasPorEmpresa.firstWhere(
+        (r) => (r['id'] as int?) == vacanteId,
+        orElse: () => {},
+      );
+      postulacionId = match['postulacion_id'] as int?;
+    }
+
+    if (postulacionId == null) {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (_) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 40, height: 4,
+                decoration: BoxDecoration(color: AppColors.borderLight,
+                    borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                  color: AppColors.accentOrange.withOpacity(0.1),
+                  shape: BoxShape.circle),
+              child: const Icon(Icons.info_outline,
+                  color: AppColors.accentOrange, size: 32),
+            ),
+            const SizedBox(height: 16),
+            Text('Sin retroalimentación disponible',
+                style: AppTextStyles.subtitle1.copyWith(fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 10),
+            Text(
+              'La empresa rechazó tu solicitud sin postulación formal, '
+              'por lo que no hay feedback disponible.',
+              style: AppTextStyles.bodyMedium.copyWith(
+                  color: AppColors.textSecondary, height: 1.5),
+              textAlign: TextAlign.center,
+            ),
+          ]),
+        ),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _RetroActivitySheet(vacante: item, postulacionId: postulacionId!),
     );
   }
 
@@ -966,4 +1060,239 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen>
       default: return m.isNotEmpty ? m : 'No especificado';
     }
   }
+}
+
+// ── Retro sheet reutilizable para activity screen ─────────────────────────────
+
+class _RetroActivitySheet extends StatefulWidget {
+  final Map<String, dynamic> vacante;
+  final int postulacionId;
+  const _RetroActivitySheet({required this.vacante, required this.postulacionId});
+
+  @override
+  State<_RetroActivitySheet> createState() => _RetroActivitySheetState();
+}
+
+class _RetroActivitySheetState extends State<_RetroActivitySheet> {
+  final _retroRepo = RetroalimentacionRepository.instance;
+  bool _cargando = true;
+  bool _generando = false;
+  RetroalimentacionRead? _retro;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    setState(() => _cargando = true);
+    final retro = await _retroRepo.getRetroalimentacion(widget.postulacionId);
+    if (mounted) setState(() { _retro = retro; _cargando = false; });
+  }
+
+  Future<void> _generarRoadmap() async {
+    debugPrint('[RetroActivitySheet] _generarRoadmap → postulacion=${widget.postulacionId}');
+    setState(() => _generando = true);
+    final retro = await _retroRepo.generarRoadmap(widget.postulacionId);
+    debugPrint('[RetroActivitySheet] generarRoadmap resultado: ${retro == null ? 'null' : 'estado=${retro.roadmapEstado}'}');
+    if (mounted) {
+      setState(() { _generando = false; if (retro != null) _retro = retro; });
+      if (retro != null && retro.roadmapPendiente) {
+        debugPrint('[RetroActivitySheet] roadmap pendiente → iniciando polling via _cargar()');
+        await _cargar();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final titulo = widget.vacante['titulo'] as String? ?? 'Vacante';
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85, maxChildSize: 0.97, minChildSize: 0.4,
+      builder: (_, ctrl) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(children: [
+          Container(margin: const EdgeInsets.only(top: 12), width: 40, height: 4,
+              decoration: BoxDecoration(color: AppColors.borderLight,
+                  borderRadius: BorderRadius.circular(2))),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                    color: AppColors.error.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12)),
+                child: const Icon(Icons.auto_awesome, color: AppColors.primaryPurple, size: 22)),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Retroalimentación', style: AppTextStyles.subtitle1.copyWith(
+                    fontWeight: FontWeight.bold)),
+                Text(titulo, style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textSecondary)),
+              ])),
+              IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+            ]),
+          ),
+          const Divider(height: 20),
+          Expanded(child: _cargando
+            ? const Center(child: CircularProgressIndicator())
+            : SingleChildScrollView(
+                controller: ctrl,
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+                child: _retro == null || !_retro!.tieneContenido
+                  ? _buildSinRetro()
+                  : _buildConRetro(_retro!),
+              ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildSinRetro() => Padding(
+    padding: const EdgeInsets.only(top: 48),
+    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Icon(Icons.feedback_outlined, size: 52, color: AppColors.textTertiary),
+      const SizedBox(height: 16),
+      Text('Sin retroalimentación aún',
+          style: AppTextStyles.subtitle1.copyWith(color: AppColors.textSecondary),
+          textAlign: TextAlign.center),
+      const SizedBox(height: 8),
+      Text('La empresa aún no ha dejado feedback para esta postulación.',
+          style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textTertiary, height: 1.5),
+          textAlign: TextAlign.center),
+    ]),
+  );
+
+  Widget _buildConRetro(RetroalimentacionRead retro) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start, children: [
+    if (retro.camposMejora != null && retro.camposMejora!.isNotEmpty) ...[
+      _header('Áreas de mejora', Icons.trending_up, AppColors.accentOrange),
+      const SizedBox(height: 8),
+      _tarjeta(retro.camposMejora!, AppColors.accentOrange),
+      const SizedBox(height: 16),
+    ],
+    if (retro.sugerenciasPerfil != null && retro.sugerenciasPerfil!.isNotEmpty) ...[
+      _header('Sugerencias de perfil', Icons.tips_and_updates_outlined, AppColors.accentBlue),
+      const SizedBox(height: 8),
+      _tarjeta(retro.sugerenciasPerfil!, AppColors.accentBlue),
+      const SizedBox(height: 20),
+    ],
+    if (retro.roadmapListo) ...[
+      _header('Plan de acción', Icons.map_outlined, AppColors.primaryPurple),
+      const SizedBox(height: 12),
+      if (retro.roadmap!.habilidades.isNotEmpty) ...[
+        Text('Habilidades clave', style: AppTextStyles.bodyMedium.copyWith(
+            fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 6, children: retro.roadmap!.habilidades
+            .map((h) => _chip(h)).toList()),
+        const SizedBox(height: 16),
+      ],
+      if (retro.roadmap!.acciones.isNotEmpty) ...[
+        Text('Acciones recomendadas', style: AppTextStyles.bodyMedium.copyWith(
+            fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        ...retro.roadmap!.acciones.map((a) => Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.check_circle_outline, size: 16, color: AppColors.accentGreen),
+            const SizedBox(width: 8),
+            Expanded(child: Text(a, style: AppTextStyles.bodyMedium.copyWith(
+                color: AppColors.textSecondary, height: 1.4))),
+          ]),
+        )),
+        const SizedBox(height: 16),
+      ],
+    ],
+    if (!retro.roadmapListo && !retro.roadmapPendiente) ...[
+      _header('Plan de acción IA', Icons.auto_awesome, AppColors.primaryPurple),
+      const SizedBox(height: 12),
+      if (retro.roadmapError) ...[
+        Container(
+          padding: const EdgeInsets.all(14),
+          margin: const EdgeInsets.only(bottom: 12),
+          decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.error.withValues(alpha: 0.3))),
+          child: const Row(children: [
+            Icon(Icons.error_outline, color: AppColors.error, size: 20),
+            SizedBox(width: 10),
+            Expanded(child: Text(
+              'Hubo un problema al generar el plan. Puedes intentarlo de nuevo.',
+              style: TextStyle(color: AppColors.error, fontSize: 13),
+            )),
+          ]),
+        ),
+      ],
+      SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _generando ? null : _generarRoadmap,
+          icon: _generando
+              ? const SizedBox(width: 16, height: 16,
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+              : Icon(retro.roadmapError ? Icons.refresh : Icons.auto_awesome, size: 16),
+          label: Text(_generando
+              ? 'Generando plan...'
+              : retro.roadmapError
+                  ? 'Reintentar generación'
+                  : 'Generar plan de acción personalizado'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primaryPurple,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+        ),
+      ),
+      const SizedBox(height: 20),
+    ],
+    if (retro.roadmapPendiente)
+      Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+            color: Colors.amber.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.amber.withValues(alpha: 0.4))),
+        child: const Row(children: [
+          Icon(Icons.pending_outlined, color: Colors.amber),
+          SizedBox(width: 10),
+          Expanded(child: Text('El plan de acción está siendo generado. Vuelve en unos momentos.',
+              style: TextStyle(color: Colors.amber))),
+        ]),
+      ),
+  ]);
+
+  Widget _header(String titulo, IconData icon, Color color) => Row(children: [
+    Icon(icon, size: 18, color: color),
+    const SizedBox(width: 8),
+    Text(titulo, style: AppTextStyles.subtitle1.copyWith(
+        fontWeight: FontWeight.bold, color: color)),
+  ]);
+
+  Widget _tarjeta(String texto, Color color) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+        color: color.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2))),
+    child: Text(texto, style: AppTextStyles.bodyMedium.copyWith(
+        color: AppColors.textSecondary, height: 1.5)),
+  );
+
+  Widget _chip(String label) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+        color: AppColors.primaryPurple.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20)),
+    child: Text(label, style: const TextStyle(fontSize: 12,
+        color: AppColors.primaryPurple, fontWeight: FontWeight.w600)),
+  );
 }

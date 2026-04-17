@@ -1,7 +1,8 @@
 // lib/data/repositories/retroalimentacion_repository.dart
 //
 // ENDPOINTS:
-// GET  /retroalimentacion/postulacion/{postulacion_id}   → obtener feedback del estudiante
+// GET  /retroalimentacion/postulacion/{postulacion_id}   → obtener feedback por postulación
+// GET  /retroalimentacion/estudiante/{estudiante_id}      → todas las retros del estudiante
 // POST /retroalimentacion/                               → crear feedback (empresa)
 // POST /retroalimentacion/postulacion/{id}/generar-roadmap → forzar generación del roadmap
 //
@@ -9,8 +10,8 @@
 // - Cache por postulacion_id para no repetir llamadas (lazy load).
 // - Polling automático cuando roadmap_estado == "pendiente":
 //   máx 5 intentos cada 3 segundos, luego resuelve con lo que haya.
-// - El PostulacionId viene del mapa local guardado al crear postulaciones.
-//   Si no hay mapa, el caller debe proveerlo desde sus datos.
+// - getRetrosEstudiante() devuelve todas las retros e incluye postulacion_id,
+//   usarlo para obtener postulacion_id dado un vacante_id (via postulación).
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -92,6 +93,7 @@ class RetroalimentacionRead {
 
   bool get roadmapListo => roadmapEstado == 'generado' && roadmap != null;
   bool get roadmapPendiente => roadmapEstado == 'pendiente';
+  bool get roadmapError => roadmapEstado == 'error';
 
   factory RetroalimentacionRead.fromJson(Map<String, dynamic> j) {
     final roadmapRaw = j['roadmap'];
@@ -196,17 +198,21 @@ class RetroalimentacionRepository {
 
   // ── Forzar generación del roadmap (endpoint adicional) ───────────────────
   Future<RetroalimentacionRead?> generarRoadmap(int postulacionId) async {
+    debugPrint('[RetroRepo] generarRoadmap → POST /retroalimentacion/postulacion/$postulacionId/generar-roadmap');
     try {
       final raw = await _api.post(
         '/retroalimentacion/postulacion/$postulacionId/generar-roadmap',
         {},
         auth: true,
       );
+      debugPrint('[RetroRepo] generarRoadmap respuesta raw: $raw');
       final retro = RetroalimentacionRead.fromJson(raw);
       _cache[postulacionId] = retro;
+      debugPrint('[RetroRepo] generarRoadmap → roadmap_estado: ${retro.roadmapEstado} | listo: ${retro.roadmapListo} | pendiente: ${retro.roadmapPendiente}');
       return retro;
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('[RetroRepo] generarRoadmap $postulacionId error: $e');
+      debugPrint('[RetroRepo] generarRoadmap stacktrace: $st');
       return null;
     }
   }
@@ -233,6 +239,36 @@ class RetroalimentacionRepository {
     } catch (e) {
       debugPrint('[RetroRepo] crearRetroalimentacion error: $e');
       return null;
+    }
+  }
+
+  // ── Listar todas las retroalimentaciones de un estudiante ────────────────
+  // GET /retroalimentacion/estudiante/{estudiante_id}
+  // Devuelve lista con postulacion_id incluido — úsalo para encontrar el
+  // postulacion_id correspondiente a una vacante rechazada.
+  Future<List<RetroalimentacionRead>> getRetrosEstudiante(
+    int estudianteId, {
+    bool forceRefresh = false,
+  }) async {
+    try {
+      final raw = await _api.get(
+        '/retroalimentacion/estudiante/$estudianteId',
+        auth: true,
+      );
+      final lista = raw is List ? raw : (raw['data'] as List? ?? []);
+      final retros = lista
+          .whereType<Map<String, dynamic>>()
+          .map(RetroalimentacionRead.fromJson)
+          .toList();
+      // Poblar cache de paso
+      for (final r in retros) {
+        _cache[r.postulacionId] = r;
+      }
+      debugPrint('[RetroRepo] retros estudiante $estudianteId: ${retros.length}');
+      return retros;
+    } catch (e) {
+      debugPrint('[RetroRepo] getRetrosEstudiante $estudianteId error: $e');
+      return [];
     }
   }
 
