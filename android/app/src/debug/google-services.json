@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "1083699305959",
+    "project_id": "jobmatch-notifications",
+    "storage_bucket": "jobmatch-notifications.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1083699305959:android:fbe137c5e12dff6a7d3142",
+        "android_client_info": {
+          "package_name": "com.example.movil"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANJLrMOcUhN0BZg1GjXcxpV_thEfnNJVk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1083699305959:android:c0be6d3b277a3bba7d3142",
+        "android_client_info": {
+          "package_name": "com.jobmatch"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANJLrMOcUhN0BZg1GjXcxpV_thEfnNJVk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -136,6 +136,14 @@ class _StudentSettingsScreenState extends State<StudentSettingsScreen> {
         ),
         _buildCard(card, [
           _tileSwitch(
+            icon: Icons.notifications_outlined,
+            title: 'Notificaciones push',
+            subtitle: 'Recibe alertas cuando haya matches o novedades',
+            value: settings.pushNotifications,
+            onChanged: settings.setPushNotifications,
+          ),
+          const Divider(height: 1),
+          _tileSwitch(
             icon: Icons.favorite_outline,
             title: 'Notificaciones de match',
             subtitle: 'Cuando una empresa también te elige',

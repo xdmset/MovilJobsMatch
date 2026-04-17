@@ -1,5 +1,6 @@
 // lib/main.dart
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
@@ -11,11 +12,13 @@ import 'presentation/providers/settings_provider.dart';
 import 'presentation/providers/theme_provider.dart';
 import 'presentation/providers/company_provider.dart';
 import 'config/routes.dart';
+import 'package:jobmatch_app/data/services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final themeProvider = ThemeProvider();
   await themeProvider.cargar();
+  await NotificationService.initialize();
   runApp(MyApp(themeProvider: themeProvider));
 }
 
@@ -44,10 +47,10 @@ class MyApp extends StatelessWidget {
         builder: (_, theme, __) => MaterialApp.router(
           title: 'JobMatch',
           debugShowCheckedModeBanner: false,
-          theme:        AppTheme.lightTheme,
-          darkTheme:    AppTheme.darkTheme,
-          themeMode:    theme.themeMode,
-          locale:       theme.locale,
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: theme.themeMode,
+          locale: theme.locale,
           routerConfig: AppRouter.router,
         ),
       ),

@@ -4,9 +4,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/repositories/student_repository.dart';
+import '../../data/repositories/retroalimentacion_repository.dart';
 
 class StudentProvider extends ChangeNotifier {
-  final _repo = StudentRepository.instance;
+  final _repo      = StudentRepository.instance;
+  final _retroRepo = RetroalimentacionRepository.instance;
 
   int? _estudianteId;
 
@@ -70,6 +72,18 @@ class StudentProvider extends ChangeNotifier {
   final List<Map<String, dynamic>> _matchesSesion   = [];
   List<Map<String, dynamic>> get matches =>
       [..._matchesSesion, ..._matchesServidor];
+
+  // ── NUEVOS ENDPOINTS ESPECÍFICOS DE SWIPES ────────────────────────────────
+  final List<Map<String, dynamic>> _aceptadas = [];
+  final List<Map<String, dynamic>> _pendientes = [];
+  final List<Map<String, dynamic>> _rechazadasPorEmpresa = [];
+
+  List<Map<String, dynamic>> get aceptadas =>
+      List.unmodifiable(_aceptadas);
+  List<Map<String, dynamic>> get pendientes =>
+      List.unmodifiable(_pendientes);
+  List<Map<String, dynamic>> get rechazadasPorEmpresa =>
+      List.unmodifiable(_rechazadasPorEmpresa);
 
   // ── Historial ─────────────────────────────────────────────────────────────
   final List<Map<String, dynamic>> _historial = [];
@@ -223,6 +237,82 @@ class StudentProvider extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('[StudentProvider] cargarMatches error: $e');
+    }
+  }
+
+  // ── NUEVOS MÉTODOS PARA ENDPOINTS ESPECÍFICOS DE SWIPES ───────────────────
+
+  /// Cargar aceptadas (matches confirmados)
+  Future<void> cargarAceptadas(int estudianteId) async {
+    _estudianteId = estudianteId;
+    try {
+      _aceptadas.clear();
+      final lista = await _repo.getAceptadasEstudiante(estudianteId);
+      _aceptadas.addAll(lista);
+      debugPrint('[StudentProvider] aceptadas: ${_aceptadas.length}');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[StudentProvider] cargarAceptadas error: $e');
+    }
+  }
+
+  /// Cargar pendientes (vacantes esperando respuesta)
+  Future<void> cargarPendientes(int estudianteId) async {
+    _estudianteId = estudianteId;
+    try {
+      _pendientes.clear();
+      final lista = await _repo.getPendientesEstudiante(estudianteId);
+      // Enriquecer con nombre/foto de empresa igual que el feed
+      final enriquecidas = await _repo.enriquecerConEmpresa(lista);
+      _pendientes.addAll(enriquecidas);
+      debugPrint('[StudentProvider] pendientes: ${_pendientes.length}');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[StudentProvider] cargarPendientes error: $e');
+    }
+  }
+
+  /// Cargar rechazadas por empresa, enriquecidas con postulacion_id desde
+  /// /retroalimentacion/estudiante/{id} (fuente más fiable que postulaciones).
+  Future<void> cargarRechazadoPorEmpresa(int estudianteId) async {
+    _estudianteId = estudianteId;
+    try {
+      _rechazadasPorEmpresa.clear();
+
+      // Cargar en paralelo: vacantes rechazadas + retros + postulaciones
+      final (lista, retros, postulaciones) = await (
+        _repo.getRechazadoPorEmpresa(estudianteId),
+        _retroRepo.getRetrosEstudiante(estudianteId),
+        _repo.getPostulacionesEstudiante(estudianteId),
+      ).wait;
+
+      // vacante_id → postulacion_id desde postulaciones del estudiante
+      final postMap = <int, int>{};
+      for (final p in postulaciones) {
+        final vid = p['vacante_id'] as int?;
+        final pid = p['id'] as int?;
+        if (vid != null && pid != null) postMap[vid] = pid;
+      }
+
+      // Inyectar postulacion_id desde el mejor source disponible
+      final enriquecidas = lista.map((v) {
+        final vacanteId = v['id'] as int?;
+        // Fuente 1: mapa de postulaciones (postulacion_id por vacante_id)
+        final postId = vacanteId != null ? postMap[vacanteId] : null;
+        if (postId != null && !v.containsKey('postulacion_id')) {
+          return <String, dynamic>{...v, 'postulacion_id': postId};
+        }
+        return v;
+      }).toList();
+
+      _rechazadasPorEmpresa.addAll(enriquecidas);
+      final conPostId = enriquecidas.where((v) => v.containsKey('postulacion_id')).length;
+      debugPrint('[StudentProvider] rechazadas por empresa: '
+          '${_rechazadasPorEmpresa.length} (con postulacion_id: $conPostId, '
+          'retros disponibles: ${retros.length})');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[StudentProvider] cargarRechazadoPorEmpresa error: $e');
     }
   }
 

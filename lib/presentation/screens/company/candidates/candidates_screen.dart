@@ -8,6 +8,7 @@ import '../../../../core/constants/app_text_styles.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../home/company_home_screen.dart' show CompanyShellNotifier;
+import '../../../../data/repositories/retroalimentacion_repository.dart';
 
 class CandidatesScreen extends StatefulWidget {
   final CompanyShellNotifier notifier;
@@ -21,11 +22,12 @@ class CandidatesScreen extends StatefulWidget {
 class _CandidatesScreenState extends State<CandidatesScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabs;
+  List<Map<String, dynamic>> _rechazados = [];
 
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 3, vsync: this);  // Cambiar de 4 a 3 tabs
+    _tabs = TabController(length: 3, vsync: this);
     widget.notifier.vacanteIdFiltro.addListener(_onFiltroChanged);
   }
 
@@ -48,8 +50,12 @@ class _CandidatesScreenState extends State<CandidatesScreen>
     final id = context.read<AuthProvider>().usuario?.id;
     if (id != null) {
       final vacanteIdFiltro = widget.notifier.vacanteIdFiltro.value;
-      await context.read<CompanyProvider>()
-          .recargarCandidatos(id, vacanteId: vacanteIdFiltro);
+      final p = context.read<CompanyProvider>();
+      await p.recargarCandidatos(id, vacanteId: vacanteIdFiltro);
+
+      // Cargar rechazados desde el endpoint de estado (que trae perfil_estudiante)
+      final rechazadosList = await p.cargarRechazados(id);
+      setState(() => _rechazados = rechazadosList);
     }
   }
 
@@ -94,22 +100,34 @@ class _CandidatesScreenState extends State<CandidatesScreen>
   }
 
   bool _esMatch(Map<String, dynamic> post) {
-    // "match" puede ser un estado propio del provider, o bien
-    // postulación pendiente con match_id no nulo.
     final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
     if (estado == 'match') return true;
+    if (estado == 'enviado') return true; // Nuevo estado del backend para postulaciones creadas
     final matchId = post['match_id'];
     return matchId != null && matchId != 0 && estado == 'pendiente';
   }
 
   bool _esAceptada(Map<String, dynamic> post) {
     final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
-    return estado == 'aceptada' || estado == 'aceptado';
+    return estado == 'aceptada' || estado == 'aceptado' || estado == 'entrevista';
   }
 
   bool _esRechazada(Map<String, dynamic> post) {
     final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
     return estado == 'rechazada' || estado == 'rechazado';
+  }
+
+  // Empresa aceptó al candidato pero aún está pendiente respuesta del estudiante
+  bool _esPendienteAceptadoPorEmpresa(Map<String, dynamic> post) {
+    final estado = (post['estado'] as String? ?? '').toLowerCase().trim();
+    if (estado != 'pendiente') return false;
+    // Si tiene match_id es un match real, _esMatch lo captura
+    final matchId = post['match_id'];
+    if (matchId != null && matchId != 0) return false;
+    // La empresa aceptó si interes_empresa == true
+    final interes = post['interes_empresa'];
+    if (interes is bool) return interes;
+    return interes?.toString().toLowerCase() == 'true';
   }
 
   @override
@@ -131,7 +149,7 @@ class _CandidatesScreenState extends State<CandidatesScreen>
                     vacanteIdFiltro,
                   );
                   final favoritosFiltrado = _filtrarPorVacante(
-                    p.postulaciones.where((post) => _esMatch(post) || _esAceptada(post)),
+                    p.postulaciones.where((post) => _esMatch(post) || _esAceptada(post) || _esPendienteAceptadoPorEmpresa(post)),
                     vacanteIdFiltro,
                   );
 
@@ -177,16 +195,13 @@ class _CandidatesScreenState extends State<CandidatesScreen>
                     }),
                     Consumer<CompanyProvider>(builder: (_, p, __) {
                       final count = _filtrarPorVacante(
-                        p.postulaciones.where((post) => _esMatch(post) || _esAceptada(post)),
+                        p.postulaciones.where((post) => _esMatch(post) || _esAceptada(post) || _esPendienteAceptadoPorEmpresa(post)),
                         vacanteIdFiltro,
                       ).length;
                       return Tab(text: 'Candidatos favoritos ($count)');
                     }),
                     Consumer<CompanyProvider>(builder: (_, p, __) {
-                      final count = _filtrarPorVacante(
-                        p.postulaciones.where(_esRechazada),
-                        vacanteIdFiltro,
-                      ).length;
+                      final count = _filtrarPorVacante(_rechazados, vacanteIdFiltro).length;
                       return Tab(text: 'Rechazados ($count)');
                     }),
                   ],
@@ -202,13 +217,10 @@ class _CandidatesScreenState extends State<CandidatesScreen>
                   vacanteIdFiltro,
                 );
 
-                final rechazados = _filtrarPorVacante(
-                  p.postulaciones.where(_esRechazada),
-                  vacanteIdFiltro,
-                );
+                final rechazados = _filtrarPorVacante(_rechazados, vacanteIdFiltro);
 
                 final favoritosFiltrado = _filtrarPorVacante(
-                  p.postulaciones.where((post) => _esMatch(post) || _esAceptada(post)),
+                  p.postulaciones.where((post) => _esMatch(post) || _esAceptada(post) || _esPendienteAceptadoPorEmpresa(post)),
                   vacanteIdFiltro,
                 );
 
@@ -391,19 +403,34 @@ class _CandidatesScreenState extends State<CandidatesScreen>
         (v) => v['id'] == vacanteId, orElse: () => {});
     final tituloV    = vacante['titulo'] as String? ?? 'Vacante #$vacanteId';
 
+    // Para rechazados, los datos vienen en perfil_estudiante anidado
+    final perfilAnidado = post['perfil_estudiante'] as Map<String, dynamic>?;
     final candidatoData = p.candidatosFeed.firstWhere(
         (c) => _toInt(c['estudiante_id'] ?? c['usuario_id']) == estudianteId &&
             _toInt(c['vacante_id']) == vacanteId,
         orElse: () => {});
-    final nombre  = post['nombre_completo'] as String?
+
+    final nombre   = post['nombre_completo'] as String?
+        ?? perfilAnidado?['nombre_completo'] as String?
         ?? candidatoData['nombre_completo'] as String?;
-    final fotoUrl = post['foto_perfil_url'] as String?
+    final fotoUrl  = post['foto_perfil_url'] as String?
+        ?? perfilAnidado?['foto_perfil_url'] as String?
         ?? candidatoData['foto_perfil_url'] as String?;
-    final inicial = nombre != null && nombre.isNotEmpty
+    final nivel      = post['nivel_academico'] as String?
+        ?? perfilAnidado?['nivel_academico'] as String?
+        ?? candidatoData['nivel_academico'] as String? ?? '';
+    final institucion = post['institucion_educativa'] as String?
+        ?? perfilAnidado?['institucion_educativa'] as String?
+        ?? candidatoData['institucion_educativa'] as String? ?? '';
+    final email    = post['email'] as String?
+        ?? perfilAnidado?['email'] as String?
+        ?? candidatoData['email'] as String? ?? '';
+    final cvUrl    = post['cv_url'] as String?
+        ?? perfilAnidado?['cv_url'] as String?
+        ?? candidatoData['cv_url'] as String?;
+    final inicial  = nombre != null && nombre.isNotEmpty
         ? nombre[0].toUpperCase() : 'E';
 
-    // BUG 1 FIX: determinar color/icono/label del header usando los estados
-    // reales del API ("aceptada", "rechazada") en vez de los incorrectos
     Color headerColor = AppColors.textSecondary;
     IconData headerIcon = Icons.pending_outlined;
     String headerLabel = 'Pendiente';
@@ -412,7 +439,7 @@ class _CandidatesScreenState extends State<CandidatesScreen>
     if (_esMatch(post)) {
       headerColor = AppColors.accentGreen;
       headerIcon  = Icons.favorite;
-      headerLabel = '¡Match!';
+      headerLabel = 'Match';
     } else if (estadoNorm == 'aceptada' || estadoNorm == 'aceptado') {
       headerColor = AppColors.accentBlue;
       headerIcon  = Icons.check_circle;
@@ -427,77 +454,270 @@ class _CandidatesScreenState extends State<CandidatesScreen>
       headerLabel = 'Entrevista';
     }
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(14),
-        border: esMatch ? Border.all(
-            color: AppColors.accentGreen.withOpacity(0.4), width: 1.5) : null,
-        boxShadow: [BoxShadow(
-            color: Colors.black.withOpacity(0.04), blurRadius: 8)],
-      ),
-      child: Column(children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: headerColor.withOpacity(0.08),
-            borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(14)),
-          ),
-          child: Row(children: [
-            Icon(headerIcon, size: 14, color: headerColor),
-            const SizedBox(width: 6),
-            Text(headerLabel, style: AppTextStyles.bodySmall.copyWith(
-                color: headerColor, fontWeight: FontWeight.bold)),
-            const Spacer(),
-            Flexible(child: Text(tituloV,
-                style: AppTextStyles.bodySmall.copyWith(
-                    color: AppColors.textTertiary),
-                maxLines: 1, overflow: TextOverflow.ellipsis)),
-            if (fechaStr.isNotEmpty) ...[
+    // Mapa enriquecido para pasar al sheet de perfil
+    final candidatoEnriquecido = {
+      ...candidatoData,
+      if (perfilAnidado != null) ...perfilAnidado,
+      ...post,
+      'estudiante_id': estudianteId,
+      'vacante_id': vacanteId,
+    };
+
+    return GestureDetector(
+      onTap: () => _mostrarPerfil(context, candidatoEnriquecido, p, soloVer: true),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: BorderRadius.circular(14),
+          border: esMatch ? Border.all(
+              color: AppColors.accentGreen.withOpacity(0.4), width: 1.5) : null,
+          boxShadow: [BoxShadow(
+              color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+        ),
+        child: Column(children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: headerColor.withOpacity(0.08),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+            ),
+            child: Row(children: [
+              Icon(headerIcon, size: 14, color: headerColor),
               const SizedBox(width: 6),
-              Text(_formatFecha(fechaStr),
+              Text(headerLabel, style: AppTextStyles.bodySmall.copyWith(
+                  color: headerColor, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              Flexible(child: Text(tituloV,
                   style: AppTextStyles.bodySmall.copyWith(
-                      color: AppColors.textTertiary)),
-            ],
-          ]),
+                      color: AppColors.textTertiary),
+                  maxLines: 1, overflow: TextOverflow.ellipsis)),
+              if (fechaStr.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Text(_formatFecha(fechaStr),
+                    style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textTertiary)),
+              ],
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                _avatarCandidato(fotoUrl, inicial, 22),
+                const SizedBox(width: 12),
+                Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(nombre ?? 'Candidato #$estudianteId',
+                      style: AppTextStyles.subtitle1.copyWith(
+                          fontWeight: FontWeight.bold)),
+                  if (nivel.isNotEmpty)
+                    Text(nivel, style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textSecondary)),
+                  if (institucion.isNotEmpty)
+                    Text(institucion, style: AppTextStyles.bodySmall.copyWith(
+                        color: AppColors.textTertiary, fontSize: 11)),
+                ])),
+                if (esMatch)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                        color: AppColors.accentGreen.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.favorite,
+                        color: AppColors.accentGreen, size: 18)),
+                const Icon(Icons.chevron_right, color: AppColors.textTertiary),
+              ]),
+              // Chips de info rápida
+              if (email.isNotEmpty || cvUrl != null) ...[
+                const SizedBox(height: 8),
+                Wrap(spacing: 6, runSpacing: 4, children: [
+                  if (email.isNotEmpty)
+                    _infoChip(Icons.email_outlined, email, AppColors.textSecondary),
+                  if (cvUrl != null && cvUrl.isNotEmpty)
+                    _infoChip(Icons.picture_as_pdf, 'CV disponible', AppColors.accentBlue),
+                ]),
+              ],
+              if (esRechazado) ...[
+                const SizedBox(height: 10),
+                _buildBotonVerFeedback(context, post),
+                const SizedBox(height: 8),
+                _buildBotonesRechazado(context, post, p, estudianteId, vacanteId, nombre),
+              ] else ...[
+                const SizedBox(height: 10),
+                _buildBotonesFavorito(context, post, p, estudianteId, vacanteId, nombre),
+              ],
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // ── Botones de acción en card de favoritos ────────────────────────────────
+  Widget _buildBotonesFavorito(
+    BuildContext context, Map<String, dynamic> post,
+    CompanyProvider p, int estudianteId, int vacanteId, String? nombre,
+  ) {
+    final userId = context.read<AuthProvider>().usuario?.id ?? 0;
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () async {
+          final confirmar = await showDialog<bool>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('¿Rechazar candidato?'),
+              content: Text(
+                'Moverás a ${nombre ?? "este candidato"} a rechazados. '
+                'Podrás darle feedback desde esa sección.',
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancelar')),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Rechazar',
+                      style: TextStyle(color: AppColors.error)),
+                ),
+              ],
+            ),
+          );
+          if (confirmar != true || !context.mounted) return;
+          debugPrint('[CandidatesScreen] reswipe negativo est=$estudianteId vac=$vacanteId');
+          final ok = await p.reswipeCandidato(
+            empresaId:    userId,
+            estudianteId: estudianteId,
+            vacanteId:    vacanteId,
+            interes:      false,
+          );
+          debugPrint('[CandidatesScreen] reswipe negativo resultado: $ok → recargando...');
+          if (!context.mounted) return;
+          await _recargar();
+          debugPrint('[CandidatesScreen] recargar completado tras reswipe negativo');
+          if (!context.mounted) return;
+          _snack(context, ok ? 'Candidato movido a rechazados' : 'Error al rechazar',
+              ok ? AppColors.textSecondary : AppColors.error);
+        },
+        icon: const Icon(Icons.close, size: 14, color: AppColors.error),
+        label: const Text('Rechazar candidato',
+            style: TextStyle(color: AppColors.error, fontSize: 13)),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 34),
+          side: const BorderSide(color: AppColors.error),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-        Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(children: [
-            _avatarCandidato(fotoUrl, inicial, 22),
-            const SizedBox(width: 12),
-            Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(nombre ?? 'Candidato #$estudianteId',
-                  style: AppTextStyles.subtitle1.copyWith(
-                      fontWeight: FontWeight.bold)),
-              Text(tituloV, style: AppTextStyles.bodySmall.copyWith(
-                  color: AppColors.textSecondary)),
-            ])),
-            if (esMatch)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                    color: AppColors.accentGreen.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.favorite,
-                    color: AppColors.accentGreen, size: 18)),
-          ]),
+      ),
+    );
+  }
+
+  // ── Botones de acción en card de rechazados ───────────────────────────────
+  Widget _buildBotonesRechazado(
+    BuildContext context, Map<String, dynamic> post,
+    CompanyProvider p, int estudianteId, int vacanteId, String? nombre,
+  ) {
+    final userId = context.read<AuthProvider>().usuario?.id ?? 0;
+    return Row(children: [
+      // Dar feedback
+      Expanded(child: OutlinedButton.icon(
+        onPressed: () => _darFeedback(context, p,
+            empresaId:    userId,
+            estudianteId: estudianteId,
+            vacanteId:    vacanteId,
+            nombre:       nombre),
+        icon: const Icon(Icons.feedback_outlined, size: 14,
+            color: AppColors.primaryPurple),
+        label: const Text('Dar feedback',
+            style: TextStyle(color: AppColors.primaryPurple, fontSize: 12)),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 34),
+          side: const BorderSide(color: AppColors.primaryPurple),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-      ]),
+      )),
+      const SizedBox(width: 8),
+      // Arrepentirse — dar match
+      Expanded(child: ElevatedButton.icon(
+        onPressed: () async {
+          final confirmar = await showDialog<bool>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('¿Aceptar candidato?'),
+              content: Text(
+                'Cambiarás el estado de ${nombre ?? "este candidato"} a favorito.',
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancelar')),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Aceptar',
+                      style: TextStyle(color: AppColors.accentGreen)),
+                ),
+              ],
+            ),
+          );
+          if (confirmar != true || !context.mounted) return;
+          debugPrint('[CandidatesScreen] reswipe positivo est=$estudianteId vac=$vacanteId');
+          final ok = await p.reswipeCandidato(
+            empresaId:    userId,
+            estudianteId: estudianteId,
+            vacanteId:    vacanteId,
+            interes:      true,
+          );
+          debugPrint('[CandidatesScreen] reswipe positivo resultado: $ok → recargando...');
+          if (!context.mounted) return;
+          await _recargar();
+          debugPrint('[CandidatesScreen] recargar completado tras reswipe positivo');
+          if (!context.mounted) return;
+          _snack(context,
+              ok ? 'Candidato movido a favoritos ✓' : 'Error al aceptar',
+              ok ? AppColors.accentGreen : AppColors.error);
+        },
+        icon: const Icon(Icons.favorite_outline, size: 14),
+        label: const Text('Aceptar', style: TextStyle(fontSize: 12)),
+        style: ElevatedButton.styleFrom(
+          minimumSize: const Size(0, 34),
+          backgroundColor: AppColors.accentGreen,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      )),
+    ]);
+  }
+
+  // ── Dar feedback a candidato rechazado ────────────────────────────────────
+  Future<void> _darFeedback(BuildContext context, CompanyProvider p, {
+    required int empresaId,
+    required int estudianteId,
+    required int vacanteId,
+    String? nombre,
+  }) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _FeedbackRechazadoSheet(
+        empresaId:    empresaId,
+        estudianteId: estudianteId,
+        vacanteId:    vacanteId,
+        nombre:       nombre,
+        provider:     p,
+      ),
     );
   }
 
   // ── Perfil completo del candidato ─────────────────────────────────────────
+  // [soloVer] = true → no muestra botones Aceptar/Rechazar (para favoritos/rechazados)
   void _mostrarPerfil(BuildContext context,
-      Map<String, dynamic> candidato, CompanyProvider p) {
-    final estudianteId = candidato['estudiante_id'] as int?
+      Map<String, dynamic> candidato, CompanyProvider p,
+      {bool soloVer = false}) {
+    final estudianteId  = candidato['estudiante_id'] as int?
         ?? candidato['usuario_id'] as int? ?? 0;
-    final vacanteId    = candidato['vacante_id']    as int? ?? 0;
-    final nombre       = candidato['nombre_completo'] as String? ?? 'Candidato';
+    final vacanteId     = candidato['vacante_id']    as int? ?? 0;
+    final postulacionId = _toInt(candidato['postulacion_id']);
+    final nombre        = candidato['nombre_completo'] as String? ?? 'Candidato';
     final nivel        = candidato['nivel_academico'] as String? ?? '';
     final institucion  = candidato['institucion_educativa'] as String? ?? '';
     final ubicacion    = candidato['ubicacion']      as String? ?? '';
@@ -659,45 +879,49 @@ class _CandidatesScreenState extends State<CandidatesScreen>
                   const SizedBox(height: 16),
                 ],
 
-                const SizedBox(height: 8),
-                Row(children: [
-                  Expanded(child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _rechazar(context, p,
-                          estudianteId: estudianteId,
-                          vacanteId: vacanteId);
-                    },
-                    icon: const Icon(Icons.close, color: AppColors.error),
-                    label: const Text('Rechazar',
-                        style: TextStyle(color: AppColors.error)),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      side: const BorderSide(color: AppColors.error),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  )),
-                  const SizedBox(width: 12),
-                  Expanded(child: ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _aceptar(context, p,
-                          estudianteId: estudianteId,
-                          vacanteId: vacanteId,
-                          nombre: nombre);
-                    },
-                    icon: const Icon(Icons.check),
-                    label: const Text('Aceptar'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.accentGreen,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  )),
-                ]),
+                if (!soloVer) ...[
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _rechazar(context, p,
+                            estudianteId:  estudianteId,
+                            vacanteId:     vacanteId,
+                            nombre:        nombre,
+                            postulacionId: postulacionId);
+                      },
+                      icon: const Icon(Icons.close, color: AppColors.error),
+                      label: const Text('Rechazar',
+                          style: TextStyle(color: AppColors.error)),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: const BorderSide(color: AppColors.error),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    )),
+                    const SizedBox(width: 12),
+                    Expanded(child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _aceptar(context, p,
+                            estudianteId: estudianteId,
+                            vacanteId: vacanteId,
+                            nombre: nombre);
+                      },
+                      icon: const Icon(Icons.check),
+                      label: const Text('Aceptar'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accentGreen,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    )),
+                  ]),
+                ],
               ]),
             )),
           ]),
@@ -753,6 +977,7 @@ class _CandidatesScreenState extends State<CandidatesScreen>
   // ── Rechazar — abre el sheet de retroalimentación ─────────────────────────
   Future<void> _rechazar(BuildContext context, CompanyProvider p, {
     required int estudianteId, required int vacanteId, String? nombre,
+    int? postulacionId,
   }) async {
     final userId = context.read<AuthProvider>().usuario?.id ?? 0;
     await showModalBottomSheet(
@@ -760,12 +985,13 @@ class _CandidatesScreenState extends State<CandidatesScreen>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _RetroalimentacionSheet(
-        estudianteId: estudianteId,
-        vacanteId:    vacanteId,
-        nombre:       nombre,
-        provider:     p,
-        userId:       userId,
-        onRechazado:  (msg) {
+        estudianteId:  estudianteId,
+        vacanteId:     vacanteId,
+        nombre:        nombre,
+        provider:      p,
+        userId:        userId,
+        postulacionId: postulacionId,
+        onRechazado:   (msg) {
           if (context.mounted) _snack(context, msg, AppColors.error);
         },
       ),
@@ -813,6 +1039,69 @@ class _CandidatesScreenState extends State<CandidatesScreen>
   Widget _secTitulo(String t) => Text(t,
       style: AppTextStyles.subtitle1.copyWith(fontWeight: FontWeight.bold));
 
+  // ── Botón "Ver feedback enviado" para tarjetas rechazadas ─────────────────
+  // Los items del endpoint /candidatos/estado/rechazados tienen:
+  //   { estudiante_id, vacante_id, estado_candidato, perfil_estudiante, ... }
+  // pero NO tienen postulacion_id (rechazo por swipe, sin postulación formal).
+  // Los items de postulaciones sí tienen 'id' (= postulacion_id).
+  Widget _buildBotonVerFeedback(
+      BuildContext context, Map<String, dynamic> post) {
+    // Los rechazados por swipe siempre tienen 'estado_candidato' y no tienen 'estado'
+    final esRechazoPorSwipe = post.containsKey('estado_candidato') &&
+        !post.containsKey('estado');
+
+    if (esRechazoPorSwipe) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.textTertiary.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.borderLight),
+        ),
+        child: Row(children: [
+          const Icon(Icons.info_outline, size: 14, color: AppColors.textTertiary),
+          const SizedBox(width: 8),
+          Expanded(child: Text(
+            'Rechazado sin postulación — no hay feedback disponible.',
+            style: AppTextStyles.bodySmall.copyWith(color: AppColors.textTertiary),
+          )),
+        ]),
+      );
+    }
+
+    // Postulación formal: usar post['id'] como postulacion_id
+    final postulacionId = _toInt(post['postulacion_id']) ?? _toInt(post['id']);
+
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: postulacionId == null
+            ? null
+            : () => _mostrarFeedbackEnviado(context, postulacionId),
+        icon: const Icon(Icons.feedback_outlined, size: 15,
+            color: AppColors.accentOrange),
+        label: const Text('Ver feedback enviado',
+            style: TextStyle(color: AppColors.accentOrange)),
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 34),
+          side: const BorderSide(color: AppColors.accentOrange),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10)),
+        ),
+      ),
+    );
+  }
+
+  void _mostrarFeedbackEnviado(BuildContext context, int postulacionId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _FeedbackEnviadoSheet(postulacionId: postulacionId),
+    );
+  }
+
   Widget _buildEmpty(String title, String sub, IconData icon) =>
     ListView(children: [
       SizedBox(height: 400, child: Center(child: Padding(
@@ -852,6 +1141,147 @@ class _CandidatesScreenState extends State<CandidatesScreen>
 
 
 // ══════════════════════════════════════════════════════════════════════════════
+// Sheet "Ver feedback enviado" — empresa ve el feedback que le mandó al candidato
+// ══════════════════════════════════════════════════════════════════════════════
+class _FeedbackEnviadoSheet extends StatefulWidget {
+  final int postulacionId;
+  const _FeedbackEnviadoSheet({required this.postulacionId});
+
+  @override
+  State<_FeedbackEnviadoSheet> createState() => _FeedbackEnviadoSheetState();
+}
+
+class _FeedbackEnviadoSheetState extends State<_FeedbackEnviadoSheet> {
+  final _repo = RetroalimentacionRepository.instance;
+  bool _cargando = true;
+  RetroalimentacionRead? _retro;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    setState(() => _cargando = true);
+    try {
+      final retro = await _repo.getRetroalimentacion(widget.postulacionId);
+      if (mounted) setState(() { _retro = retro; _cargando = false; });
+    } catch (_) {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6, maxChildSize: 0.92, minChildSize: 0.35,
+      builder: (_, ctrl) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardColor,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(children: [
+          Container(margin: const EdgeInsets.only(top: 12), width: 40, height: 4,
+              decoration: BoxDecoration(color: AppColors.borderLight,
+                  borderRadius: BorderRadius.circular(2))),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+            child: Row(children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                    color: AppColors.accentOrange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.feedback_outlined,
+                    color: AppColors.accentOrange, size: 18)),
+              const SizedBox(width: 10),
+              const Expanded(child: Text('Feedback enviado',
+                  style: AppTextStyles.h4)),
+            ]),
+          ),
+          const Divider(height: 20),
+          Expanded(child: _cargando
+            ? const Center(child: CircularProgressIndicator())
+            : _retro == null
+              ? const Center(child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('No hay feedback registrado para esta postulación.',
+                      textAlign: TextAlign.center)))
+              : SingleChildScrollView(
+                  controller: ctrl,
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    if (_retro!.camposMejora != null &&
+                        _retro!.camposMejora!.isNotEmpty) ...[
+                      _seccion('Áreas de mejora indicadas',
+                          Icons.trending_up, AppColors.accentOrange),
+                      const SizedBox(height: 8),
+                      _tarjeta(_retro!.camposMejora!,
+                          AppColors.accentOrange),
+                      const SizedBox(height: 16),
+                    ],
+                    if (_retro!.sugerenciasPerfil != null &&
+                        _retro!.sugerenciasPerfil!.isNotEmpty) ...[
+                      _seccion('Sugerencias de perfil enviadas',
+                          Icons.tips_and_updates_outlined, AppColors.accentBlue),
+                      const SizedBox(height: 8),
+                      _tarjeta(_retro!.sugerenciasPerfil!,
+                          AppColors.accentBlue),
+                      const SizedBox(height: 16),
+                    ],
+                    if (_retro!.roadmapEstado != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.accentGreen.withOpacity(0.07),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: AppColors.accentGreen.withOpacity(0.25)),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.auto_awesome,
+                              size: 14, color: AppColors.accentGreen),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(
+                            _retro!.roadmapListo
+                              ? 'El candidato ya puede ver el roadmap de IA generado.'
+                              : 'El roadmap de IA está siendo generado para el candidato.',
+                            style: AppTextStyles.bodySmall.copyWith(
+                                color: AppColors.textSecondary),
+                          )),
+                        ]),
+                      ),
+                    ],
+                  ]),
+                ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _seccion(String titulo, IconData icon, Color color) => Row(children: [
+    Icon(icon, size: 16, color: color),
+    const SizedBox(width: 6),
+    Text(titulo, style: AppTextStyles.subtitle1.copyWith(
+        fontWeight: FontWeight.bold, color: color)),
+  ]);
+
+  Widget _tarjeta(String contenido, Color color) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+        color: color.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2))),
+    child: Text(contenido, style: AppTextStyles.bodyMedium.copyWith(
+        color: AppColors.textSecondary, height: 1.5)),
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // Sheet de retroalimentación — BUG 2 FIX
 // ══════════════════════════════════════════════════════════════════════════════
 class _RetroalimentacionSheet extends StatefulWidget {
@@ -860,6 +1290,7 @@ class _RetroalimentacionSheet extends StatefulWidget {
   final String? nombre;
   final CompanyProvider provider;
   final int userId;
+  final int? postulacionId;
   final void Function(String mensaje) onRechazado;
 
   const _RetroalimentacionSheet({
@@ -869,6 +1300,7 @@ class _RetroalimentacionSheet extends StatefulWidget {
     required this.provider,
     required this.userId,
     required this.onRechazado,
+    this.postulacionId,
   });
 
   @override
@@ -895,64 +1327,43 @@ class _RetroalimentacionSheetState extends State<_RetroalimentacionSheet> {
 
     final p = widget.provider;
 
-    // 1. Swipe negativo (rechazar en el feed de swipes)
-    await p.swipeEstudiante(
-      empresaId:    widget.userId,
-      estudianteId: widget.estudianteId,
-      vacanteId:    widget.vacanteId,
-      interes:      false,
-    );
+    try {
+      final resultado = await p.rechazarCandidato(
+        empresaId:         widget.userId,
+        estudianteId:      widget.estudianteId,
+        vacanteId:         widget.vacanteId,
+        camposMejora:      _camposCtrl.text.trim(),
+        sugerenciasPerfil: _sugerenciasCtrl.text.trim().isEmpty
+            ? null
+            : _sugerenciasCtrl.text.trim(),
+      );
 
-    // 2. Recargar postulaciones para tener el id de postulación actualizado
-    await p.recargarPostulaciones(widget.userId);
+      await p.recargarCandidatos(widget.userId);
 
-    // BUG 2 FIX: comparar con _toInt() para evitar mismatch int/String,
-    // y buscar por cualquier estado (no solo rechazada) ya que puede ser
-    // que el swipe negativo cree la postulación pero no la marque como
-    // rechazada todavía desde el backend.
-    final postulacion = p.postulaciones.firstWhere(
-      (post) =>
-          _toInt(post['estudiante_id']) == widget.estudianteId &&
-          _toInt(post['vacante_id'])    == widget.vacanteId,
-      orElse: () => {},
-    );
-
-    if (postulacion.isNotEmpty) {
-      final postId = _toInt(postulacion['id']);
-      debugPrint('[RetroSheet] postulacion encontrada id=$postId '
-          'estado=${postulacion['estado']}');
-
-      if (postId != null) {
-        await p.crearRetroalimentacion(
-          postulacionId:     postId,
-          camposMejora:      _camposCtrl.text.trim(),
-          sugerenciasPerfil: _sugerenciasCtrl.text.trim().isEmpty
-              ? null
-              : _sugerenciasCtrl.text.trim(),
+      if (!mounted) return;
+      Navigator.pop(context);
+      if (resultado.retroCreada) {
+        widget.onRechazado('Candidato rechazado y feedback enviado ✓');
+      } else if (resultado.exito && _camposCtrl.text.trim().isNotEmpty) {
+        widget.onRechazado(
+          'Candidato rechazado — el feedback no pudo enviarse porque '
+          'el candidato no tiene postulación formal en esta vacante.',
         );
+      } else {
+        widget.onRechazado('Candidato rechazado');
       }
-    } else {
-      // La postulación no existe aún: el swipe negativo puede no crearla
-      // si el estudiante nunca tuvo una postulación formal.
-      // En ese caso, registrar solo el swipe es suficiente.
-      debugPrint('[RetroSheet] No se encontró postulación para '
-          'estudiante=${widget.estudianteId} vacante=${widget.vacanteId} '
-          '— el rechazo se registró solo vía swipe.');
+
+    } catch (e) {
+      debugPrint('[RetroSheet] Error inesperado en _enviar: $e');
+      if (!mounted) return;
+      setState(() => _enviando = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Error al rechazar candidato. Intenta de nuevo.'),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ));
     }
-
-    // FIX: Recargar candidatos para sincronizar cambios con el servidor
-    await p.recargarCandidatos(widget.userId);
-
-    if (!mounted) return;
-
-    Navigator.pop(context);
-    widget.onRechazado('Candidato rechazado ✓');
-  }
-
-  // Helper local (igual que en el screen padre)
-  int? _toInt(dynamic value) {
-    if (value is int) return value;
-    return int.tryParse(value?.toString() ?? '');
   }
 
   @override
@@ -994,7 +1405,7 @@ class _RetroalimentacionSheetState extends State<_RetroalimentacionSheet> {
                   const SizedBox(width: 12),
                   Expanded(child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Retroalimentación al candidato',
+                    Text('Confirmar rechazo',
                         style: AppTextStyles.h4.copyWith(
                             fontWeight: FontWeight.bold)),
                     Text(widget.nombre ?? 'Candidato',
@@ -1003,94 +1414,104 @@ class _RetroalimentacionSheetState extends State<_RetroalimentacionSheet> {
                   ])),
                 ]),
                 const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 7),
-                  decoration: BoxDecoration(
-                      color: AppColors.error.withOpacity(0.06),
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Text(
-                    'Esta información le llegará al estudiante para '
-                    'que sepa en qué puede mejorar su perfil.',
-                    style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.error.withOpacity(0.8)),
+
+                // Info contextual según si existe postulación formal
+                if (widget.postulacionId != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                        color: AppColors.error.withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Text(
+                      'El feedback que escribas se enviará al candidato '
+                      'y la IA generará un plan de mejora personalizado.',
+                      style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.error.withOpacity(0.8)),
+                    ),
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                        color: AppColors.accentOrange.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: AppColors.accentOrange.withOpacity(0.3))),
+                    child: Row(children: [
+                      const Icon(Icons.info_outline,
+                          size: 14, color: AppColors.accentOrange),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(
+                        'Este candidato solo dio like sin postularse formalmente. '
+                        'El rechazo quedará registrado pero no es posible enviarle feedback.',
+                        style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.accentOrange),
+                      )),
+                    ]),
                   ),
-                ),
                 const SizedBox(height: 20),
 
-                Text('Áreas de mejora *',
-                    style: AppTextStyles.subtitle1.copyWith(
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _camposCtrl,
-                  maxLines: 3,
-                  maxLength: 300,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    hintText:
-                        'Ej: SQL avanzado, Docker, experiencia en equipos ágiles...',
-                    filled: true,
-                    fillColor: AppColors.primaryPurple.withOpacity(0.03),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            const BorderSide(color: AppColors.borderLight)),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(
-                            color: AppColors.primaryPurple, width: 2)),
-                    errorBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(
-                            color: AppColors.error, width: 1.5)),
+                // Campos de feedback solo si hay postulación formal
+                if (widget.postulacionId != null) ...[
+                  Text('Áreas de mejora (opcional)',
+                      style: AppTextStyles.subtitle1.copyWith(
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _camposCtrl,
+                    maxLines: 3,
+                    maxLength: 300,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: 'Explica por qué no es el candidato adecuado...',
+                      filled: true,
+                      fillColor: AppColors.primaryPurple.withOpacity(0.03),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.borderLight)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: AppColors.primaryPurple, width: 2)),
+                    ),
+                    validator: (v) => null,
                   ),
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) {
-                      return 'Indica al menos un área de mejora';
-                    }
-                    if (v.trim().length < 10) {
-                      return 'Sé más específico (mínimo 10 caracteres)';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
+                  const SizedBox(height: 16),
 
-                Text('Sugerencias para su perfil',
-                    style: AppTextStyles.subtitle1.copyWith(
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                Text('Opcional — consejos para mejorar su perfil o CV',
-                    style: AppTextStyles.bodySmall.copyWith(
-                        color: AppColors.textTertiary)),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _sugerenciasCtrl,
-                  maxLines: 3,
-                  maxLength: 300,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    hintText:
-                        'Ej: Mejora tu portfolio con proyectos reales, '
-                        'agrega más detalle a tu experiencia...',
-                    filled: true,
-                    fillColor: AppColors.primaryPurple.withOpacity(0.03),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            const BorderSide(color: AppColors.borderLight)),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(
-                            color: AppColors.primaryPurple, width: 2)),
+                  Text('Sugerencias para su perfil',
+                      style: AppTextStyles.subtitle1.copyWith(
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text('Opcional — consejos para mejorar su CV o perfil',
+                      style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textTertiary)),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _sugerenciasCtrl,
+                    maxLines: 3,
+                    maxLength: 300,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: 'Ej: Agrega más detalle a tu experiencia, '
+                          'mejora tu portfolio...',
+                      filled: true,
+                      fillColor: AppColors.primaryPurple.withOpacity(0.03),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.borderLight)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: AppColors.primaryPurple, width: 2)),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 24),
+                  const SizedBox(height: 24),
+                ] else
+                  const SizedBox(height: 8),
 
                 Row(children: [
                   Expanded(child: OutlinedButton(
@@ -1112,8 +1533,12 @@ class _RetroalimentacionSheetState extends State<_RetroalimentacionSheet> {
                             width: 16, height: 16,
                             child: CircularProgressIndicator(
                                 color: Colors.white, strokeWidth: 2))
-                        : const Icon(Icons.send_outlined, size: 16),
-                    label: Text(_enviando ? 'Enviando...' : 'Rechazar y enviar'),
+                        : const Icon(Icons.close, size: 16),
+                    label: Text(_enviando
+                        ? 'Procesando...'
+                        : widget.postulacionId != null
+                            ? 'Rechazar y enviar feedback'
+                            : 'Confirmar rechazo'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.error,
                       foregroundColor: Colors.white,
@@ -1123,6 +1548,336 @@ class _RetroalimentacionSheetState extends State<_RetroalimentacionSheet> {
                     ),
                   )),
                 ]),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Sheet de feedback para candidatos ya rechazados
+// Busca la postulacion_id en el backend y crea la retroalimentación.
+// ══════════════════════════════════════════════════════════════════════════════
+class _FeedbackRechazadoSheet extends StatefulWidget {
+  final int empresaId;
+  final int estudianteId;
+  final int vacanteId;
+  final String? nombre;
+  final CompanyProvider provider;
+
+  const _FeedbackRechazadoSheet({
+    required this.empresaId,
+    required this.estudianteId,
+    required this.vacanteId,
+    required this.nombre,
+    required this.provider,
+  });
+
+  @override
+  State<_FeedbackRechazadoSheet> createState() => _FeedbackRechazadoSheetState();
+}
+
+class _FeedbackRechazadoSheetState extends State<_FeedbackRechazadoSheet> {
+  final _camposCtrl      = TextEditingController();
+  final _sugerenciasCtrl = TextEditingController();
+  final _formKey         = GlobalKey<FormState>();
+  bool _enviando  = false;
+  bool _buscando  = true;
+  int? _postulacionId;
+  bool _yaEnvioFeedback = false; // true si ya existe retroalimentación
+
+  @override
+  void initState() {
+    super.initState();
+    _buscarPostulacion();
+  }
+
+  @override
+  void dispose() {
+    _camposCtrl.dispose();
+    _sugerenciasCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _buscarPostulacion() async {
+    debugPrint('[FeedbackSheet] buscando postulacion est=${widget.estudianteId} vac=${widget.vacanteId}');
+    final pid = await widget.provider.buscarPostulacionId(
+      empresaId:    widget.empresaId,
+      estudianteId: widget.estudianteId,
+      vacanteId:    widget.vacanteId,
+    );
+    debugPrint('[FeedbackSheet] postulacion_id=$pid');
+    if (!mounted) return;
+
+    if (pid != null) {
+      // Verificar si ya hay retroalimentación para esta postulación
+      final retro = await RetroalimentacionRepository.instance
+          .getRetroalimentacion(pid);
+      debugPrint('[FeedbackSheet] retro existente: ${retro?.tieneContenido}');
+      if (!mounted) return;
+      setState(() {
+        _postulacionId = pid;
+        _yaEnvioFeedback = retro != null && retro.tieneContenido;
+        _buscando = false;
+      });
+    } else {
+      setState(() { _postulacionId = null; _buscando = false; });
+    }
+  }
+
+  Future<void> _enviar() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _enviando = true);
+    final resultado = await widget.provider.enviarFeedbackRechazado(
+      empresaId:         widget.empresaId,
+      estudianteId:      widget.estudianteId,
+      vacanteId:         widget.vacanteId,
+      camposMejora:      _camposCtrl.text.trim(),
+      sugerenciasPerfil: _sugerenciasCtrl.text.trim().isEmpty
+          ? null : _sugerenciasCtrl.text.trim(),
+    );
+    if (!mounted) return;
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(resultado.retroCreada
+          ? 'Feedback enviado ✓ — la IA generará el plan de mejora'
+          : resultado.encontrado
+              ? 'Error al guardar el feedback. Intenta de nuevo.'
+              : 'Este candidato no tiene postulación formal — no se puede enviar feedback.'),
+      backgroundColor: resultado.retroCreada ? AppColors.accentGreen : AppColors.error,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(
+                      color: AppColors.borderLight,
+                      borderRadius: BorderRadius.circular(2)),
+                )),
+                const SizedBox(height: 18),
+
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: AppColors.primaryPurple.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.auto_awesome,
+                        color: AppColors.primaryPurple, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('Enviar feedback',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(widget.nombre ?? 'Candidato',
+                        style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.textSecondary)),
+                  ])),
+                ]),
+                const SizedBox(height: 12),
+
+                if (_buscando)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (_postulacionId == null)
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                        color: AppColors.accentOrange.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: AppColors.accentOrange.withOpacity(0.3))),
+                    child: Row(children: [
+                      const Icon(Icons.info_outline,
+                          color: AppColors.accentOrange, size: 18),
+                      const SizedBox(width: 10),
+                      const Expanded(child: Text(
+                        'Este candidato rechazó la vacante antes del match, '
+                        'por lo que no tiene postulación formal. '
+                        'No es posible enviarle retroalimentación.',
+                        style: TextStyle(color: AppColors.accentOrange),
+                      )),
+                    ]),
+                  )
+                else if (_yaEnvioFeedback) ...[
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                        color: AppColors.accentGreen.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: AppColors.accentGreen.withValues(alpha: 0.3))),
+                    child: const Row(children: [
+                      Icon(Icons.check_circle_outline,
+                          color: AppColors.accentGreen, size: 18),
+                      SizedBox(width: 10),
+                      Expanded(child: Text(
+                        'Ya enviaste retroalimentación a este candidato. '
+                        'No es posible enviarla dos veces.',
+                        style: TextStyle(color: AppColors.accentGreen),
+                      )),
+                    ]),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: const BorderSide(color: AppColors.primaryPurple),
+                        foregroundColor: AppColors.primaryPurple,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text('Cerrar'),
+                    ),
+                  ),
+                ] else ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                        color: AppColors.accentGreen.withOpacity(0.07),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Text(
+                      'El feedback se enviará al candidato y '
+                      'la IA generará un plan de mejora personalizado.',
+                      style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.accentGreen),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  Text('Áreas de mejora *',
+                      style: AppTextStyles.subtitle1.copyWith(
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _camposCtrl,
+                    maxLines: 3,
+                    maxLength: 300,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: 'Explica por qué no continuó el proceso...',
+                      filled: true,
+                      fillColor: AppColors.primaryPurple.withOpacity(0.03),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.borderLight)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: AppColors.primaryPurple, width: 2)),
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Escribe al menos una área de mejora' : null,
+                  ),
+                  const SizedBox(height: 16),
+
+                  Text('Sugerencias de perfil',
+                      style: AppTextStyles.subtitle1.copyWith(
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text('Opcional — consejos para mejorar su CV o perfil',
+                      style: AppTextStyles.bodySmall.copyWith(
+                          color: AppColors.textTertiary)),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _sugerenciasCtrl,
+                    maxLines: 3,
+                    maxLength: 300,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: 'Ej: Agrega más proyectos al portfolio...',
+                      filled: true,
+                      fillColor: AppColors.primaryPurple.withOpacity(0.03),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.borderLight)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: AppColors.primaryPurple, width: 2)),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  Row(children: [
+                    Expanded(child: OutlinedButton(
+                      onPressed: _enviando ? null : () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: const BorderSide(color: AppColors.primaryPurple),
+                        foregroundColor: AppColors.primaryPurple,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text('Cancelar'),
+                    )),
+                    const SizedBox(width: 12),
+                    Expanded(child: ElevatedButton.icon(
+                      onPressed: _enviando ? null : _enviar,
+                      icon: _enviando
+                          ? const SizedBox(width: 16, height: 16,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2))
+                          : const Icon(Icons.send_outlined, size: 16),
+                      label: Text(_enviando ? 'Enviando...' : 'Enviar feedback'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryPurple,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    )),
+                  ]),
+                ],
+
+                if (_postulacionId == null && !_buscando) ...[
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text('Cerrar'),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

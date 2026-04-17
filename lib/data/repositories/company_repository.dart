@@ -182,7 +182,101 @@ class CompanyRepository {
     }
   }
 
+  // ── NUEVOS ENDPOINTS DE CANDIDATOS POR ESTADO ────────────────────────────
+  // Estos endpoints filtran candidatos por su estado (matches, rechazados, pendientes)
+
+  /// GET /swipes/empresa/{id}/candidatos/estado/{estado}
+  /// Obtiene candidatos de TODAS las vacantes filtrados por estado
+  /// Estados: matches, rechazados, pendientes
+  Future<List<Map<String, dynamic>>> getCandidatosPorEstado(
+    int empresaId,
+    String estado, {
+    int skip = 0,
+    int limit = 100,
+  }) async {
+    try {
+      final query = {'skip': skip.toString(), 'limit': limit.toString()};
+      final raw = await _api.get(
+        '/swipes/empresa/$empresaId/candidatos/estado/$estado',
+        query: query,
+        auth: true,
+      );
+      final lista = raw is List ? raw : (raw['data'] as List? ?? []);
+      debugPrint('[CompanyRepo] candidatos estado $estado: ${lista.length}');
+      return lista.cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('[CompanyRepo] getCandidatosPorEstado $estado error: $e');
+      return [];
+    }
+  }
+
+  /// GET /swipes/empresa/{id}/vacante/{vacante_id}/candidatos/estado/{estado}
+  /// Obtiene candidatos de UNA vacante específica filtrados por estado
+  Future<List<Map<String, dynamic>>> getCandidatosPorEstadoVacante(
+    int empresaId,
+    int vacanteId,
+    String estado, {
+    int skip = 0,
+    int limit = 100,
+  }) async {
+    try {
+      final query = {'skip': skip.toString(), 'limit': limit.toString()};
+      final raw = await _api.get(
+        '/swipes/empresa/$empresaId/vacante/$vacanteId/candidatos/estado/$estado',
+        query: query,
+        auth: true,
+      );
+      final lista = raw is List ? raw : (raw['data'] as List? ?? []);
+      debugPrint('[CompanyRepo] candidatos vacante $vacanteId estado $estado: ${lista.length}');
+      return lista.cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('[CompanyRepo] getCandidatosPorEstadoVacante '
+          'vacante=$vacanteId estado=$estado error: $e');
+      return [];
+    }
+  }
+
   // ── Postulaciones ─────────────────────────────────────────────────────────
+
+  /// POST /postulaciones/web
+  /// Crea una postulación manualmente. Necesario cuando la empresa quiere rechazar
+  /// a un candidato que nunca tuvo postulación previa (swipe negativo directo).
+  Future<Map<String, dynamic>> crearPostulacion({
+    required int estudianteId,
+    required int vacanteId,
+  }) async {
+    final body = {
+      'estudiante_id': estudianteId,
+      'vacante_id':    vacanteId,
+    };
+    debugPrint('[CompanyRepo] POST /postulaciones/web body: $body');
+    final raw = await _api.post('/postulaciones/web', body, auth: true);
+    debugPrint('[CompanyRepo] crearPostulacion response: $raw');
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw as Map);
+    return {};
+  }
+
+  /// PUT /postulaciones/{id}/estado
+  /// Cambia el estado de una postulación. Puede incluir feedback inline.
+  Future<void> cambiarEstadoConFeedback(
+    int postId,
+    String nuevoEstado, {
+    String? camposMejora,
+    String? sugerenciasPerfil,
+  }) async {
+    final body = <String, dynamic>{'nuevo_estado': nuevoEstado};
+    if (camposMejora != null && camposMejora.isNotEmpty) {
+      body['feedback'] = {
+        'campos_mejora':   camposMejora,
+        if (sugerenciasPerfil != null && sugerenciasPerfil.isNotEmpty)
+          'sugerencias_perfil': sugerenciasPerfil,
+      };
+    }
+    debugPrint('[CompanyRepo] PUT /postulaciones/$postId/estado body: $body');
+    await _api.put('/postulaciones/$postId/estado', body, auth: true);
+  }
+
   Future<List<Map<String, dynamic>>> getPostulaciones(int empresaId, {
     String? estado,
     String? institucionEducativa,
@@ -246,6 +340,29 @@ class CompanyRepository {
     return normalizadas;
   }
 
+  // ── Crear postulación web (cuando no existe una formal) ───────────────────
+  // POST /postulaciones/web
+  // body: { estudiante_id, vacante_id }
+  Future<int?> crearPostulacionWeb({
+    required int estudianteId,
+    required int vacanteId,
+  }) async {
+    final body = {
+      'estudiante_id': estudianteId,
+      'vacante_id':    vacanteId,
+    };
+    debugPrint('[CompanyRepo] POST /postulaciones/web body: $body');
+    try {
+      final res = await _api.post('/postulaciones/web', body, auth: true);
+      final id = (res is Map) ? (res['id'] as int? ?? res['data']?['id'] as int?) : null;
+      debugPrint('[CompanyRepo] crearPostulacionWeb → postulacion_id=$id');
+      return id;
+    } catch (e) {
+      debugPrint('[CompanyRepo] crearPostulacionWeb error: $e');
+      return null;
+    }
+  }
+
   // ── Swipe empresa → estudiante ────────────────────────────────────────────
   Future<Map<String, dynamic>?> swipeEstudiante({
     required int empresaId,
@@ -293,5 +410,40 @@ class CompanyRepository {
   Future<void> cambiarEstadoPostulacion(int postId, String estado) async {
     await _api.put('/postulaciones/$postId/estado',
         {'nuevo_estado': estado}, auth: true);
+  }
+
+  Future<void> generarRoadmap(int postulacionId) async {
+    debugPrint('[CompanyRepo] POST /retroalimentacion/postulacion/$postulacionId/generar-roadmap');
+    await _api.post(
+        '/retroalimentacion/postulacion/$postulacionId/generar-roadmap',
+        {}, auth: true);
+  }
+
+  /// Busca el postulacion_id de un candidato para una vacante específica.
+  /// GET /postulaciones/empresa/{empresaId} filtrando por estudiante_id y vacante_id.
+  Future<int?> buscarPostulacionId({
+    required int empresaId,
+    required int estudianteId,
+    required int vacanteId,
+  }) async {
+    try {
+      final lista = await getPostulaciones(empresaId);
+      for (final p in lista) {
+        final pEst = p['estudiante_id'] as int? ?? p['usuario_id'] as int?;
+        final pVac = p['vacante_id'] as int?;
+        if (pEst == estudianteId && pVac == vacanteId) {
+          final pid = p['id'] as int?;
+          debugPrint('[CompanyRepo] buscarPostulacionId → $pid '
+              '(est=$estudianteId, vac=$vacanteId)');
+          return pid;
+        }
+      }
+      debugPrint('[CompanyRepo] buscarPostulacionId → no encontrada '
+          '(est=$estudianteId, vac=$vacanteId)');
+      return null;
+    } catch (e) {
+      debugPrint('[CompanyRepo] buscarPostulacionId error: $e');
+      return null;
+    }
   }
 }
